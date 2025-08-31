@@ -15,6 +15,8 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
+// --- No error messages at all, just silent if errors happen ---
+
 async function isInChannel(userId) {
   try {
     const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
@@ -184,7 +186,7 @@ function premiumList() {
   return Object.keys(global.premium).filter(isPremium);
 }
 
-// --- Plugin Loader (handles both / and . prefix commands) ---
+// --- Plugin Loader (handles both /command and .command) ---
 function loadPlugins(bot, folder) {
   fs.readdirSync(folder).forEach(file => {
     const fullPath = path.join(folder, file);
@@ -193,7 +195,6 @@ function loadPlugins(bot, folder) {
     } else if (file.endsWith('.js')) {
       const plugin = require(fullPath);
 
-      // Handles both ".command" and "/command"
       if (plugin.pattern instanceof RegExp) {
         bot.hears(plugin.pattern, async ctx => {
           try {
@@ -284,6 +285,7 @@ bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch (e) {} });
 bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch (e) {} });
 bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch (e) {} });
 
+// --- Render/Vercel/Panel Keepalive (HTTP) ---
 const http = require('http');
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
