@@ -15,8 +15,6 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
-// --- No error messages at all, just silent if errors happen ---
-
 async function isInChannel(userId) {
   try {
     const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
@@ -41,14 +39,12 @@ bot.use(async (ctx, next) => {
       }
     }
     return next();
-  } catch (e) {
-    // Silent fail, no error message to user
-  }
+  } catch (e) {}
 });
 
 function sendMenu(ctx) {
   const menu =
-`╭━━━━━【 CYBIX V3 】━━━━━
+`╭━━━━━━━【 CYBIX V3 】━━━━━━━
 ┃ @${ctx.from.username || ctx.from.first_name}
 ┣━ users: ${global.users.size}
 ┣━ groups: ${global.groups.size}
@@ -149,7 +145,7 @@ function sendMenu(ctx) {
 ┃ • .logs
 ╰━━━━━━━━━━━━━━━
 
-▣ powered by **CYBIX TECH**💀
+▣ powered by *CYBIX TECH* 👹💀
 `;
   try {
     return ctx.replyWithPhoto(
@@ -188,7 +184,7 @@ function premiumList() {
   return Object.keys(global.premium).filter(isPremium);
 }
 
-// --- Plugin Loader (NO ERROR HANDLING, NO ERROR MESSAGES) ---
+// --- Plugin Loader (handles both / and . prefix commands) ---
 function loadPlugins(bot, folder) {
   fs.readdirSync(folder).forEach(file => {
     const fullPath = path.join(folder, file);
@@ -196,25 +192,43 @@ function loadPlugins(bot, folder) {
       loadPlugins(bot, fullPath);
     } else if (file.endsWith('.js')) {
       const plugin = require(fullPath);
-      bot.hears(plugin.pattern, async ctx => {
-        try {
-          if (fullPath.includes('plugins/premium')) {
-            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+
+      // Handles both ".command" and "/command"
+      if (plugin.pattern instanceof RegExp) {
+        bot.hears(plugin.pattern, async ctx => {
+          try {
+            if (fullPath.includes('plugins/premium')) {
+              if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+                return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+              }
             }
-          }
-          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch (e) {
-          // Silent fail, no error message to user
+            await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+          } catch (e) {}
+        });
+        // Support /command as well as .command for plugin commands
+        const cmdMatch = plugin.pattern.source.match(/^\\?\.([a-z0-9_]+)/i);
+        if (cmdMatch) {
+          bot.command(cmdMatch[1], async ctx => {
+            try {
+              if (fullPath.includes('plugins/premium')) {
+                if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+                  return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+                }
+              }
+              await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+            } catch (e) {}
+          });
         }
-      });
+      }
     }
   });
 }
 loadPlugins(bot, path.join(__dirname, 'plugins'));
 
-bot.start(sendMenu);
-bot.command('menu', sendMenu);
+// --- Always respond to /start and /menu ---
+bot.start((ctx) => sendMenu(ctx));
+bot.command('menu', (ctx) => sendMenu(ctx));
+bot.hears(/^\.menu$/i, (ctx) => sendMenu(ctx));
 
 // --- Developer Premium Control ---
 bot.hears(/^\.addpremium (\d+)$/, async ctx => {
