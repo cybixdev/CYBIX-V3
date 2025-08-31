@@ -2,7 +2,6 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 const moment = require('moment');
 const config = require('./config');
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -15,40 +14,45 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
-async function isInChannel(userId) {
-  try {
-    const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
-    return res.status === 'member' || res.status === 'administrator' || res.status === 'creator';
-  } catch {
-    return false;
-  }
-}
+function savePremium() { try { fs.writeFileSync(PREMIUM_FILE, JSON.stringify(global.premium, null, 2)); } catch {} }
+function isPremium(id) { return global.premium[id] && moment().isBefore(moment(global.premium[id])); }
+function setPremium(id, months = 1) { global.premium[id] = moment().add(months, 'months').valueOf(); savePremium(); }
+function removePremium(id) { delete global.premium[id]; savePremium(); }
+function premiumLeft(id) { if (!isPremium(id)) return "None"; return moment(global.premium[id]).fromNow(); }
+function premiumList() { return Object.keys(global.premium).filter(isPremium); }
+
 bot.use(async (ctx, next) => {
-  if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
-  if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
-  if (ctx.chat.type === 'private') {
-    const ok = await isInChannel(ctx.from.id);
-    if (!ok) {
-      return ctx.reply(
-        `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
-        Markup.inlineKeyboard([
-          [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
-        ])
-      );
+  try {
+    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
+    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
+    if (ctx.chat.type === 'private') {
+      let ok = false;
+      try {
+        const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, ctx.from.id);
+        ok = res.status === 'member' || res.status === 'administrator' || res.status === 'creator';
+      } catch {}
+      if (!ok) {
+        return ctx.reply(
+          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
+          Markup.inlineKeyboard([
+            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
+          ])
+        );
+      }
     }
-  }
-  return next();
+    return next();
+  } catch {}
 });
 
 function sendMenu(ctx) {
-  const menu =
-`╭━━━━【 CYBIX V3 】━━━━
+  const menu = `
+╭━━━━━━━【 CYBIX V3 】━━━━━━━
 ┃ @${ctx.from.username || ctx.from.first_name}
 ┣━ users: ${global.users.size}
 ┣━ groups: ${global.groups.size}
 ┣━ prefix: "."
 ┣━ owner: ${config.developer}
-╰━━━━━━━━━━━━━━━━━━━━━
+╰━━━━━━━━━━━━━━━━━━━━━━
 
 ╭━━【 MAIN MENU 】━━
 ┃ • .ping
@@ -142,45 +146,31 @@ function sendMenu(ctx) {
 ┃ • .stats
 ┃ • .logs
 ╰━━━━━━━━━━━━━━━
+╭━━【 ADULT MENU 】━━
+┃ • .xnxx
+┃ • .hentai
+┃ • .rule34
+┃ • .porngif
+┃ • .sexpic
+┃ *Premium only*
+╰━━━━━━━━━━━━━━━
 
 ▣ powered by *CYBIX TECH* 👹💀
-`;
-  return ctx.replyWithPhoto(
-    { url: config.banner },
-    {
-      caption: menu,
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(config.buttons)
-    }
-  );
-}
-
-// --- Premium Helpers ---
-function savePremium() {
+  `;
   try {
-    fs.writeFileSync(PREMIUM_FILE, JSON.stringify(global.premium, null, 2));
-  } catch {}
-}
-function isPremium(id) {
-  return global.premium[id] && moment().isBefore(moment(global.premium[id]));
-}
-function setPremium(id, months = 1) {
-  global.premium[id] = moment().add(months, 'months').valueOf();
-  savePremium();
-}
-function removePremium(id) {
-  delete global.premium[id];
-  savePremium();
-}
-function premiumLeft(id) {
-  if (!isPremium(id)) return "None";
-  return moment(global.premium[id]).fromNow();
-}
-function premiumList() {
-  return Object.keys(global.premium).filter(isPremium);
+    return ctx.replyWithPhoto(
+      { url: config.banner },
+      {
+        caption: menu,
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(config.buttons)
+      }
+    );
+  } catch {
+    try { ctx.reply(menu); } catch {}
+  }
 }
 
-// --- Plugin Loader
 function loadPlugins(bot, folder) {
   fs.readdirSync(folder).forEach(file => {
     const fullPath = path.join(folder, file);
@@ -188,16 +178,48 @@ function loadPlugins(bot, folder) {
       loadPlugins(bot, fullPath);
     } else if (file.endsWith('.js')) {
       const plugin = require(fullPath);
-      bot.hears(plugin.pattern, async ctx => {
-        if (fullPath.includes('plugins/premium')) {
-          if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-            return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-          }
-        }
+      bot.hears(new RegExp(`^\\.${plugin.command}( |$)`, "i"), async ctx => {
         try {
+          if (fullPath.includes('adult') || fullPath.includes('premium')) {
+            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+            }
+          }
           await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch (e) {
-          await ctx.reply('❌ Error: ' + (e.message || "Unknown error"));
+        } catch {}
+      });
+      bot.command(plugin.command, async ctx => {
+        try {
+          if (fullPath.includes('adult') || fullPath.includes('premium')) {
+            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+            }
+          }
+          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+        } catch {}
+      });
+      (plugin.aliases || []).forEach(alias => {
+        if (alias !== plugin.command) {
+          bot.hears(new RegExp(`^\\.${alias}( |$)`, "i"), async ctx => {
+            try {
+              if (fullPath.includes('adult') || fullPath.includes('premium')) {
+                if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+                  return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+                }
+              }
+              await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+            } catch {}
+          });
+          bot.command(alias, async ctx => {
+            try {
+              if (fullPath.includes('adult') || fullPath.includes('premium')) {
+                if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+                  return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+                }
+              }
+              await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+            } catch {}
+          });
         }
       });
     }
@@ -207,8 +229,8 @@ loadPlugins(bot, path.join(__dirname, 'plugins'));
 
 bot.start(sendMenu);
 bot.command('menu', sendMenu);
+bot.hears(/^\.menu$/i, sendMenu);
 
-// --- Developer Premium Control ---
 bot.hears(/^\.addpremium (\d+)$/, async ctx => {
   if (String(ctx.from.id) !== process.env.OWNER_ID) return;
   setPremium(ctx.match[1], 1);
@@ -233,8 +255,6 @@ bot.hears(/^\.setvip (\d+) (\d+)$/, async ctx => {
   setPremium(ctx.match[1], Number(ctx.match[2]));
   await ctx.reply(`✅ VIP enabled for user ${ctx.match[1]} for ${ctx.match[2]} months.`);
 });
-
-// --- Broadcast for owner only ---
 bot.hears(/^\.broadcast (.+)/, async ctx => {
   if (String(ctx.from.id) !== process.env.OWNER_ID) return;
   const msg = ctx.match[1];
@@ -243,10 +263,7 @@ bot.hears(/^\.broadcast (.+)/, async ctx => {
       await bot.telegram.sendPhoto(
         id,
         { url: config.banner },
-        {
-          caption: `📢 Broadcast:\n${msg}`,
-          ...Markup.inlineKeyboard(config.buttons)
-        }
+        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
       );
     } catch {}
   }
@@ -255,22 +272,17 @@ bot.hears(/^\.broadcast (.+)/, async ctx => {
       await bot.telegram.sendPhoto(
         gid,
         { url: config.banner },
-        {
-          caption: `📢 Broadcast:\n${msg}`,
-          ...Markup.inlineKeyboard(config.buttons)
-        }
+        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
       );
     } catch {}
   }
   await ctx.reply('✅ Broadcast sent!');
 });
 
-// --- Group/channel support ---
-bot.on('new_chat_members', ctx => sendMenu(ctx));
-bot.on('group_chat_created', ctx => sendMenu(ctx));
-bot.on('channel_post', ctx => sendMenu(ctx));
+bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch {} });
+bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch {} });
+bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch {} });
 
-// --- Render/Vercel/Panel Keepalive (HTTP) ---
 const http = require('http');
 const PORT = process.env.PORT || 3000;
 http.createServer((req, res) => {
