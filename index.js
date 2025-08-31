@@ -2,7 +2,6 @@ require('dotenv').config();
 const { Telegraf, Markup } = require('telegraf');
 const fs = require('fs');
 const path = require('path');
-const axios = require('axios');
 const moment = require('moment');
 const config = require('./config');
 const bot = new Telegraf(process.env.BOT_TOKEN);
@@ -15,7 +14,31 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
-// ----------- FIX: respond to /start, /menu, .menu, and all plugin commands -----------
+// ----------- Middleware for channel check and user/group tracking -----------
+bot.use(async (ctx, next) => {
+  try {
+    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
+    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
+    if (ctx.chat.type === 'private') {
+      let ok = false;
+      try {
+        const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, ctx.from.id);
+        ok = res.status === 'member' || res.status === 'administrator' || res.status === 'creator';
+      } catch {}
+      if (!ok) {
+        return ctx.reply(
+          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
+          Markup.inlineKeyboard([
+            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
+          ])
+        );
+      }
+    }
+    return next();
+  } catch {}
+});
+
+// ----------- Menu function -----------
 function sendMenu(ctx) {
   const menu =
 `╭━━━━━━━【 CYBIX V3 】━━━━━━━
@@ -121,51 +144,21 @@ function sendMenu(ctx) {
 
 ▣ powered by *CYBIX TECH* 👹💀
 `;
-  return ctx.replyWithPhoto(
-    { url: config.banner },
-    {
-      caption: menu,
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(config.buttons)
-    }
-  );
-}
-
-// ----------- Channel membership check -----------
-async function isInChannel(userId) {
   try {
-    const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
-    return res.status === 'member' || res.status === 'administrator' || res.status === 'creator';
-  } catch {
-    return false;
-  }
-}
-
-// ----------- Middleware for channel check and tracking users/groups -----------
-bot.use(async (ctx, next) => {
-  try {
-    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
-    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
-    if (ctx.chat.type === 'private') {
-      const ok = await isInChannel(ctx.from.id);
-      if (!ok) {
-        return ctx.reply(
-          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
-          Markup.inlineKeyboard([
-            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
-          ])
-        );
+    return ctx.replyWithPhoto(
+      { url: config.banner },
+      {
+        caption: menu,
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(config.buttons)
       }
-    }
-    return next();
-  } catch (e) {}
-});
+    );
+  } catch {}
+}
 
 // ----------- Premium helpers -----------
 function savePremium() {
-  try {
-    fs.writeFileSync(PREMIUM_FILE, JSON.stringify(global.premium, null, 2));
-  } catch {}
+  try { fs.writeFileSync(PREMIUM_FILE, JSON.stringify(global.premium, null, 2)); } catch {}
 }
 function isPremium(id) {
   return global.premium[id] && moment().isBefore(moment(global.premium[id]));
@@ -186,7 +179,7 @@ function premiumList() {
   return Object.keys(global.premium).filter(isPremium);
 }
 
-// ----------- Plugin loader: listens for both .command and /command -----------
+// ----------- Plugin loader: listens for BOTH .command and /command -----------
 function loadPlugins(bot, folder) {
   fs.readdirSync(folder).forEach(file => {
     const fullPath = path.join(folder, file);
@@ -203,7 +196,7 @@ function loadPlugins(bot, folder) {
             }
           }
           await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch (e) {}
+        } catch {}
       });
       // Listen for slash prefix
       // If pattern is /^\.command/ then register /command as .command
@@ -217,7 +210,7 @@ function loadPlugins(bot, folder) {
               }
             }
             await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-          } catch (e) {}
+          } catch {}
         });
       }
     }
@@ -281,9 +274,9 @@ bot.hears(/^\.broadcast (.+)/, async ctx => {
 });
 
 // ----------- Menu on new group/channel/join -----------
-bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch (e) {} });
-bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch (e) {} });
-bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch (e) {} });
+bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch {} });
+bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch {} });
+bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch {} });
 
 // ----------- Health check for deployment -----------
 const http = require('http');
