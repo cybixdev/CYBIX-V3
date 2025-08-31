@@ -15,21 +15,6 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
-// --- GLOBAL ERROR HANDLER ---
-bot.catch((err, ctx) => {
-  console.error('Bot error:', err);
-  if (ctx && ctx.reply) {
-    ctx.reply('❌ An unexpected error occurred. Please try again or contact the owner.');
-  }
-});
-process.on('unhandledRejection', (err) => {
-  console.error('Unhandled Rejection:', err);
-});
-process.on('uncaughtException', (err) => {
-  console.error('Uncaught Exception:', err);
-});
-
-// --- Channel Membership Check ---
 async function isInChannel(userId) {
   try {
     const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
@@ -39,25 +24,20 @@ async function isInChannel(userId) {
   }
 }
 bot.use(async (ctx, next) => {
-  try {
-    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
-    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
-    if (ctx.chat.type === 'private') {
-      const ok = await isInChannel(ctx.from.id);
-      if (!ok) {
-        return ctx.reply(
-          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
-          Markup.inlineKeyboard([
-            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
-          ])
-        );
-      }
+  if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
+  if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
+  if (ctx.chat.type === 'private') {
+    const ok = await isInChannel(ctx.from.id);
+    if (!ok) {
+      return ctx.reply(
+        `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
+        Markup.inlineKeyboard([
+          [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
+        ])
+      );
     }
-    return next();
-  } catch (e) {
-    console.error('Middleware error:', e);
-    if (ctx && ctx.reply) ctx.reply('❌ Unexpected error. Try again.');
   }
+  return next();
 });
 
 function sendMenu(ctx) {
@@ -200,7 +180,7 @@ function premiumList() {
   return Object.keys(global.premium).filter(isPremium);
 }
 
-// --- Plugin Loader
+// --- Plugin Loader (NO ERROR HANDLING, NO ERROR MESSAGES) ---
 function loadPlugins(bot, folder) {
   fs.readdirSync(folder).forEach(file => {
     const fullPath = path.join(folder, file);
@@ -209,17 +189,12 @@ function loadPlugins(bot, folder) {
     } else if (file.endsWith('.js')) {
       const plugin = require(fullPath);
       bot.hears(plugin.pattern, async ctx => {
-        try {
-          if (fullPath.includes('plugins/premium')) {
-            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-            }
+        if (fullPath.includes('plugins/premium')) {
+          if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+            return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
           }
-          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch (e) {
-          console.error(`Plugin error (${fullPath}):`, e);
-          if (ctx && ctx.reply) ctx.reply('❌ Error in plugin command. Try again or contact the owner.');
         }
+        await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
       });
     }
   });
@@ -231,101 +206,54 @@ bot.command('menu', sendMenu);
 
 // --- Developer Premium Control ---
 bot.hears(/^\.addpremium (\d+)$/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    setPremium(ctx.match[1], 1);
-    await ctx.reply(`✅ Premium enabled for user ${ctx.match[1]} for 1 month.`);
-  } catch (e) {
-    console.error('addpremium error:', e);
-    ctx.reply('❌ Could not add premium.');
-  }
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  setPremium(ctx.match[1], 1);
+  await ctx.reply(`✅ Premium enabled for user ${ctx.match[1]} for 1 month.`);
 });
 bot.hears(/^\.removepremium (\d+)$/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    removePremium(ctx.match[1]);
-    await ctx.reply(`✅ Premium removed for user ${ctx.match[1]}.`);
-  } catch (e) {
-    console.error('removepremium error:', e);
-    ctx.reply('❌ Could not remove premium.');
-  }
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  removePremium(ctx.match[1]);
+  await ctx.reply(`✅ Premium removed for user ${ctx.match[1]}.`);
 });
 bot.hears(/^\.premiumlist$/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    await ctx.reply(`Premium users:\n${premiumList().join('\n') || 'None'}`);
-  } catch (e) {
-    console.error('premiumlist error:', e);
-    ctx.reply('❌ Could not list premium users.');
-  }
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  await ctx.reply(`Premium users:\n${premiumList().join('\n') || 'None'}`);
 });
 bot.hears(/^\.renewpremium (\d+)$/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    setPremium(ctx.match[1], 1);
-    await ctx.reply(`✅ Premium renewed for user ${ctx.match[1]} for 1 month.`);
-  } catch (e) {
-    console.error('renewpremium error:', e);
-    ctx.reply('❌ Could not renew premium.');
-  }
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  setPremium(ctx.match[1], 1);
+  await ctx.reply(`✅ Premium renewed for user ${ctx.match[1]} for 1 month.`);
 });
 bot.hears(/^\.setvip (\d+) (\d+)$/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    setPremium(ctx.match[1], Number(ctx.match[2]));
-    await ctx.reply(`✅ VIP enabled for user ${ctx.match[1]} for ${ctx.match[2]} months.`);
-  } catch (e) {
-    console.error('setvip error:', e);
-    ctx.reply('❌ Could not set VIP.');
-  }
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  setPremium(ctx.match[1], Number(ctx.match[2]));
+  await ctx.reply(`✅ VIP enabled for user ${ctx.match[1]} for ${ctx.match[2]} months.`);
 });
 
-// --- Broadcast for owner only ---
 bot.hears(/^\.broadcast (.+)/, async ctx => {
-  try {
-    if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-    const msg = ctx.match[1];
-    for (const id of global.users) {
-      try {
-        await bot.telegram.sendPhoto(
-          id,
-          { url: config.banner },
-          {
-            caption: `📢 Broadcast:\n${msg}`,
-            ...Markup.inlineKeyboard(config.buttons)
-          }
-        );
-      } catch (e) {
-        console.error(`Broadcast to user ${id} failed:`, e);
-      }
-    }
-    for (const gid of global.groups) {
-      try {
-        await bot.telegram.sendPhoto(
-          gid,
-          { url: config.banner },
-          {
-            caption: `📢 Broadcast:\n${msg}`,
-            ...Markup.inlineKeyboard(config.buttons)
-          }
-        );
-      } catch (e) {
-        console.error(`Broadcast to group ${gid} failed:`, e);
-      }
-    }
-    await ctx.reply('✅ Broadcast sent!');
-  } catch (e) {
-    console.error('broadcast error:', e);
-    ctx.reply('❌ Could not send broadcast.');
+  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
+  const msg = ctx.match[1];
+  for (const id of global.users) {
+    await bot.telegram.sendPhoto(
+      id,
+      { url: config.banner },
+      { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
+    );
   }
+  for (const gid of global.groups) {
+    await bot.telegram.sendPhoto(
+      gid,
+      { url: config.banner },
+      { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
+    );
+  }
+  await ctx.reply('✅ Broadcast sent!');
 });
 
-// --- Group/channel support ---
-bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch (e) {} });
-bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch (e) {} });
-bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch (e) {} });
+bot.on('new_chat_members', ctx => sendMenu(ctx));
+bot.on('group_chat_created', ctx => sendMenu(ctx));
+bot.on('channel_post', ctx => sendMenu(ctx));
 
-// --- Render/Vercel/Panel Keepalive (HTTP) ---
 const http = require('http');
 const PORT = process.env.PORT || 10000;
 http.createServer((req, res) => {
