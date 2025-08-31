@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: cybix-v3
+    env: node
+    plan: starter
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: BOT_TOKEN
+        fromDotEnv: true
+      - key: OWNER_ID
+        fromDotEnv: true
+      - key: CHANNEL_USERNAME
+        fromDotEnv: true
+    autoDeploy: true

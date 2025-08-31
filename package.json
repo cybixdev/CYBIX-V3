@@ -1,0 +1,15 @@
+{
+  "name": "cybix_v3",
+  "version": "3.0.0",
+  "description": "CYBIX V3 tg bot by Jaden Afrix.",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "telegraf": "^4.14.1",
+    "dotenv": "^16.4.2",
+    "axios": "^1.7.2",
+    "moment": "^2.29.4"
+  }
+}
