@@ -15,6 +15,8 @@ if (fs.existsSync(PREMIUM_FILE)) {
   try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
 }
 
+// --- No error messages at all, just silent if errors happen ---
+
 async function isInChannel(userId) {
   try {
     const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, userId);
@@ -24,25 +26,29 @@ async function isInChannel(userId) {
   }
 }
 bot.use(async (ctx, next) => {
-  if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
-  if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
-  if (ctx.chat.type === 'private') {
-    const ok = await isInChannel(ctx.from.id);
-    if (!ok) {
-      return ctx.reply(
-        `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
-        Markup.inlineKeyboard([
-          [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
-        ])
-      );
+  try {
+    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
+    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
+    if (ctx.chat.type === 'private') {
+      const ok = await isInChannel(ctx.from.id);
+      if (!ok) {
+        return ctx.reply(
+          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
+          Markup.inlineKeyboard([
+            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
+          ])
+        );
+      }
     }
+    return next();
+  } catch (e) {
+    // Silent fail, no error message to user
   }
-  return next();
 });
 
 function sendMenu(ctx) {
   const menu =
-`╭━━━━━━━【 CYBIX V3 】━━━━━━━
+`╭━━━━━【 CYBIX V3 】━━━━━
 ┃ @${ctx.from.username || ctx.from.first_name}
 ┣━ users: ${global.users.size}
 ┣━ groups: ${global.groups.size}
@@ -143,16 +149,18 @@ function sendMenu(ctx) {
 ┃ • .logs
 ╰━━━━━━━━━━━━━━━
 
-▣ powered by *CYBIX TECH* 👹💀
+▣ powered by **CYBIX TECH**💀
 `;
-  return ctx.replyWithPhoto(
-    { url: config.banner },
-    {
-      caption: menu,
-      parse_mode: 'Markdown',
-      ...Markup.inlineKeyboard(config.buttons)
-    }
-  );
+  try {
+    return ctx.replyWithPhoto(
+      { url: config.banner },
+      {
+        caption: menu,
+        parse_mode: 'Markdown',
+        ...Markup.inlineKeyboard(config.buttons)
+      }
+    );
+  } catch (e) {}
 }
 
 // --- Premium Helpers ---
@@ -189,12 +197,16 @@ function loadPlugins(bot, folder) {
     } else if (file.endsWith('.js')) {
       const plugin = require(fullPath);
       bot.hears(plugin.pattern, async ctx => {
-        if (fullPath.includes('plugins/premium')) {
-          if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-            return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+        try {
+          if (fullPath.includes('plugins/premium')) {
+            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
+              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
+            }
           }
+          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
+        } catch (e) {
+          // Silent fail, no error message to user
         }
-        await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
       });
     }
   });
@@ -234,25 +246,29 @@ bot.hears(/^\.broadcast (.+)/, async ctx => {
   if (String(ctx.from.id) !== process.env.OWNER_ID) return;
   const msg = ctx.match[1];
   for (const id of global.users) {
-    await bot.telegram.sendPhoto(
-      id,
-      { url: config.banner },
-      { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
-    );
+    try {
+      await bot.telegram.sendPhoto(
+        id,
+        { url: config.banner },
+        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
+      );
+    } catch (e) {}
   }
   for (const gid of global.groups) {
-    await bot.telegram.sendPhoto(
-      gid,
-      { url: config.banner },
-      { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
-    );
+    try {
+      await bot.telegram.sendPhoto(
+        gid,
+        { url: config.banner },
+        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
+      );
+    } catch (e) {}
   }
   await ctx.reply('✅ Broadcast sent!');
 });
 
-bot.on('new_chat_members', ctx => sendMenu(ctx));
-bot.on('group_chat_created', ctx => sendMenu(ctx));
-bot.on('channel_post', ctx => sendMenu(ctx));
+bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch (e) {} });
+bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch (e) {} });
+bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch (e) {} });
 
 const http = require('http');
 const PORT = process.env.PORT || 10000;
