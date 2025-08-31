@@ -144,6 +144,7 @@ function sendMenu(ctx) {
 
 ▣ powered by *CYBIX TECH* 👹💀
 `;
+  // Always reply, even if error
   try {
     return ctx.replyWithPhoto(
       { url: config.banner },
@@ -153,7 +154,9 @@ function sendMenu(ctx) {
         ...Markup.inlineKeyboard(config.buttons)
       }
     );
-  } catch {}
+  } catch {
+    try { ctx.reply(menu); } catch {}
+  }
 }
 
 // ----------- Premium helpers -----------
