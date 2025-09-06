@@ -1,4 +1,4 @@
-// EXPRESS SERVER FOR RENDER DEPLOYMENT
+// EXPRESS SERVER FOR DEPLOYMENT
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -10,7 +10,7 @@ require("dotenv").config();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const OWNER_ID = process.env.OWNER_ID;
 
-// DEPENDENCIES (ALL UPDATED & SUPPORTED)
+// DEPENDENCIES (ALL UPDATED)
 const fs = require("fs");
 const chalk = require("chalk");
 const moment = require("moment-timezone");
@@ -20,14 +20,8 @@ const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion,
 const axios = require("axios");
 const pino = require("pino");
 const TelegramBot = require("node-telegram-bot-api");
-const { TelegramClient } = require("telegram");
-const readlineSync = require("readline-sync");
-const qrcode = require("qrcode-terminal");
-const bodyParser = require("body-parser");
 const { Octokit } = require("@octokit/rest");
-const twilio = require("twilio");
-const archiver = require("archiver");
-const unzipper = require("unzipper");
+const qrcode = require("qrcode-terminal");
 
 // DATA FILES
 const DATA_FILES = {
@@ -94,7 +88,6 @@ startWhatsapp();
 
 // TELEGRAM BOT SETUP
 const bot = new Telegraf(BOT_TOKEN);
-const tgBot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 let maintenance = {
   enabled: false,
@@ -138,24 +131,6 @@ function requireWA(ctx, next) {
 }
 
 // MENUS
-const telegramMenu = `
-━━━━━━━━━━━━━━━━━━
-CYBIX BUG SYSTEM
-━━━━━━━━━━━━━━━━━━
-OWNER INFO
-┏━━━━━━━━━━━━━━
-┃ ⎚ OWNER ID : ${OWNER_ID}
-┃ ⎚ OWNER : [your status]
-┃ ⎚ ADMIN : [your status]
-┃ ⎚ PREMIUM : [your status]
-┗━━━━━━━━━━━━━━
-┏━━━━━━COMMANDS━━━━━
-☞ /bugmenu
-☞ /ownermenu
-☞ /othermenu
-━━━━━━━━━━━━━━━━━━
-`;
-
 bot.start(async ctx => {
   const menu = `
 ━━━━━━━━━━━━━━━━━━
