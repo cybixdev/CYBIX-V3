@@ -15,8 +15,6 @@
     "pino": "^9.5.0",
     "fs": "^0.0.1-security",
     "axios": "^1.6.0",
-    "node-telegram-bot-api": "^0.64.0",
-    "@octokit/rest": "^20.0.0",
     "qrcode-terminal": "^0.12.0"
   }
 }

@@ -1,8 +1,14 @@
-// EXPRESS SERVER FOR DEPLOYMENT
+// EXPRESS SERVER FOR RENDER DEPLOYMENT (UPGRADED, STAYS AWAKE)
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 8080;
 app.get("/", (req, res) => res.send("CYBIX BUG BOT IS RUNNING!"));
+app.get("/ping", (req, res) => res.send("pong")); // For Render keep-alive
+setInterval(() => {
+  // Self-ping to keep Render instance awake
+  axios.get(`http://localhost:${PORT}/ping`).catch(() => {});
+}, 1000 * 60 * 5); // Every 5 minutes
+
 app.listen(PORT, () => console.log("[CYBIX][EXPRESS] Listening on port " + PORT));
 
 // ENV
@@ -16,11 +22,9 @@ const chalk = require("chalk");
 const moment = require("moment-timezone");
 const crypto = require("crypto");
 const { Telegraf } = require("telegraf");
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeInMemoryStore, generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 const axios = require("axios");
 const pino = require("pino");
-const TelegramBot = require("node-telegram-bot-api");
-const { Octokit } = require("@octokit/rest");
+const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeInMemoryStore, generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
 const qrcode = require("qrcode-terminal");
 
 // DATA FILES
