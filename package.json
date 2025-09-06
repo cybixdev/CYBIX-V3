@@ -1,29 +1,28 @@
 {
   "name": "cybixbug",
   "version": "1.0.0",
-  "description": "CYBIX BUG - Telegram x WhatsApp ultra-brutal bug bot",
   "main": "cybixbug.js",
   "scripts": {
     "start": "node cybixbug.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "github:kangfarrel/felzar-Baileys",
-    "axios": "^1.6.0",
-    "body-parser": "^1.20.3",
-    "chalk": "^4.1.2",
-    "crypto": "^1.0.1",
-    "dotenv": "^16.4.7",
+    "@whiskeysockets/baileys": "^6.6.0",
+    "telegraf": "^4.16.3",
     "express": "^4.21.2",
-    "fs": "^0.0.1-security",
+    "chalk": "^4.1.2",
+    "dotenv": "^16.4.7",
     "moment-timezone": "^0.5.34",
-    "node-telegram-bot-api": "^0.64.0",
     "pino": "^9.5.0",
-    "qrcode-terminal": "^0.12.0",
+    "fs": "^0.0.1-security",
+    "axios": "^1.6.0",
+    "node-telegram-bot-api": "^0.64.0",
+    "telegram": "^2.26.8",
     "readline-sync": "^1.4.10",
     "@octokit/rest": "^20.0.0",
-    "telegraf": "^4.16.3",
-    "telegram": "^2.26.8",
+    "qrcode-terminal": "^0.12.0",
     "twilio": "^5.3.7",
-    "whatsapp-web.js": "^1.26.0"
+    "archiver": "^5.3.2",
+    "unzipper": "^0.10.11",
+    "body-parser": "^1.20.3"
   }
 }
