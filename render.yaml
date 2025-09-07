@@ -1,15 +1,16 @@
 services:
-- type: web
-  name: cybixbug
-  env: node
-  plan: starter
-  buildCommand: "npm install"
-  startCommand: "node cybixbug.js"
-  autoDeploy: true
-  envVars:
-    - key: BOT_TOKEN
-      sync: false
-    - key: OWNER_ID
-      sync: false
-    - key: PORT
-      sync: false
+  - type: web
+    name: cybixtech-api
+    env: node
+    plan: starter
+    buildCommand: "npm install"
+    startCommand: "npm start"
+    envVars:
+      - key: JWT_SECRET
+        sync: false
+      - key: ADMIN_EMAIL
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: PORT
+        value: 3001

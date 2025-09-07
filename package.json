@@ -1,29 +1,19 @@
 {
-  "name": "cybixbug",
+  "name": "cybixtech-api",
   "version": "1.0.0",
-  "description": "CYBIX BUG - Telegram x WhatsApp ultra-brutal bug bot",
-  "main": "cybixbug.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node cybixbug.js"
+    "start": "node index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.19",
-    "axios": "^1.6.0",
-    "body-parser": "^1.20.2",
-    "chalk": "^5.3.0",
-    "crypto": "^1.0.1",
-    "dotenv": "^16.4.7",
-    "express": "^4.19.2",
-    "fs": "^0.0.1-security",
-    "moment-timezone": "^0.5.43",
-    "node-telegram-bot-api": "^0.64.0",
-    "pino": "^9.9.0",
-    "qrcode-terminal": "^0.12.0",
-    "readline-sync": "^1.4.10",
-    "@octokit/rest": "^20.0.0",
-    "telegraf": "^4.16.3",
-    "telegram": "^2.26.8",
-    "twilio": "^5.3.7",
-    "whatsapp-web.js": "^1.26.0"
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "bcrypt": "^5.1.0",
+    "jsonwebtoken": "^9.0.1",
+    "multer": "^1.4.5-lts.1",
+    "jszip": "^3.10.1",
+    "moment": "^2.29.4",
+    "uuid": "^9.0.0"
   }
 }
