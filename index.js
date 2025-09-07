@@ -12,13 +12,13 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// --- In-memory storage (replace with database in production) ---
+// --- In-memory DB (swap for a real DB in production) ---
 const users = {};
-const codes = {}; // { email: { code, expires, type } }
+const codes = {};
 const premium = {};
 const stats = { registrations: 0 };
 
-// --- Utility Functions ---
+// --- JWT Auth ---
 function genToken(user) {
   return jwt.sign({
     id: user.id,
@@ -54,13 +54,11 @@ if (!users[process.env.ADMIN_EMAIL]) {
 }
 
 // --- User Endpoints ---
-// Check if user exists (for bot and signup)
 app.post('/user/check', (req, res) => {
   const { email } = req.body;
   return res.json({ exists: !!users[email] });
 });
 
-// Sign up (code from Telegram bot required)
 app.post('/user/signup', (req, res) => {
   const { name, username, email, password, code } = req.body;
   if (users[email]) return res.status(400).json({ error: 'Email exists' });
@@ -83,7 +81,6 @@ app.post('/user/signup', (req, res) => {
   return res.json({ token, user: { ...users[email], password: undefined } });
 });
 
-// Login (by email/username/name)
 app.post('/user/login', (req, res) => {
   const { identifier, password } = req.body;
   const user = Object.values(users).find(u =>
@@ -95,7 +92,6 @@ app.post('/user/login', (req, res) => {
   return res.json({ token, user: { ...user, password: undefined } });
 });
 
-// Password reset (via Telegram bot code)
 app.post('/user/reset', (req, res) => {
   const { email, password, code } = req.body;
   if (!users[email]) return res.status(404).json({ error: 'User not found' });
@@ -107,26 +103,7 @@ app.post('/user/reset', (req, res) => {
   return res.json({ ok: true });
 });
 
-// --- Premium Management ---
-// Premium add (owner only, called from bot)
-app.post('/admin/add-premium', (req, res) => {
-  const { email } = req.body;
-  if (!users[email]) return res.status(404).json({ error: 'User not found' });
-  users[email].premium = true;
-  premium[email] = { expires: moment().add(1, 'month').toISOString() };
-  return res.json({ ok: true });
-});
-// Premium expire check (run every hour)
-setInterval(() => {
-  Object.entries(premium).forEach(([email, value]) => {
-    if (moment().isAfter(value.expires)) {
-      if (users[email]) users[email].premium = false;
-      delete premium[email];
-    }
-  });
-}, 3600 * 1000);
-
-// --- Telegram bot code entry (for signup/reset), called by bot only ---
+// --- Telegram Bot Integration ---
 app.post('/telegram/code', (req, res) => {
   const { email, code, type } = req.body;
   codes[email] = {
@@ -137,24 +114,38 @@ app.post('/telegram/code', (req, res) => {
   return res.json({ ok: true });
 });
 
-// --- Code Obfuscation & Deobfuscation ---
-// Simple obfuscation/deobfuscation logic (replace with libs for real use)
+// --- Premium Management ---
+app.post('/admin/add-premium', (req, res) => {
+  const { email } = req.body;
+  if (!users[email]) return res.status(404).json({ error: 'User not found' });
+  users[email].premium = true;
+  premium[email] = { expires: moment().add(1, 'month').toISOString() };
+  return res.json({ ok: true });
+});
+setInterval(() => {
+  Object.entries(premium).forEach(([email, value]) => {
+    if (moment().isAfter(value.expires)) {
+      if (users[email]) users[email].premium = false;
+      delete premium[email];
+    }
+  });
+}, 3600 * 1000);
+
+// --- Code Obfuscation/Deobfuscation ---
 function obfuscate(code, lang, type, repeats) {
   let result = code;
-  for (let i = 0; i < repeats; i++) {
+  for (let i = 0; i < (repeats || 1); i++) {
     result = Buffer.from(result).toString('base64');
   }
   return `// CYBIX TECH Obfuscated (${lang}, type: ${type}, repeats: ${repeats})\n${result}`;
 }
 function deobfuscate(code, lang, type, repeats) {
   let result = code.replace(/\/\/ CYBIX TECH Obfuscated.*\n/, '');
-  for (let i = 0; i < repeats; i++) {
+  for (let i = 0; i < (repeats || 1); i++) {
     result = Buffer.from(result, 'base64').toString('utf8');
   }
   return result;
 }
-
-// Basic language detection
 function detectLang(filename, content) {
   const ext = filename.split('.').pop();
   const mapping = { js: 'javascript', py: 'python', html: 'html', css: 'css', jsx: 'react', ts: 'typescript', java: 'java' };
@@ -164,8 +155,6 @@ function detectLang(filename, content) {
   if (content.includes('function ')) return 'javascript';
   return 'unknown';
 }
-
-// --- Code API ---
 app.post('/code/obfuscate', auth, (req, res) => {
   const { code, type, repeats, lang } = req.body;
   if (!code || !lang) return res.status(400).json({ error: 'Missing code or lang' });
